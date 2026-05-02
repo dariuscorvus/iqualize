@@ -46,17 +46,26 @@ enum EQChannel: String, Codable, Sendable {
 
 // MARK: - EQ Band
 
-struct EQBand: Codable, Equatable, Sendable {
+struct EQBand: Codable, Equatable, Sendable, Identifiable {
     var frequency: Float   // Hz (20...20000)
     var gain: Float        // dB (-12...+12)
     var bandwidth: Float   // octaves, default 1.0
     var filterType: FilterType
+    var muted: Bool
+    /// In-memory identity for SwiftUI / animation. Not persisted; freshly minted on decode and copy.
+    var id: UUID
 
-    init(frequency: Float, gain: Float, bandwidth: Float = 1.0, filterType: FilterType = .parametric) {
+    enum CodingKeys: String, CodingKey {
+        case frequency, gain, bandwidth, filterType
+    }
+
+    init(frequency: Float, gain: Float, bandwidth: Float = 1.0, filterType: FilterType = .parametric, muted: Bool = false, id: UUID = UUID()) {
         self.frequency = frequency
         self.gain = gain
         self.bandwidth = bandwidth
         self.filterType = filterType
+        self.muted = muted
+        self.id = id
     }
 
     init(from decoder: Decoder) throws {
@@ -65,6 +74,16 @@ struct EQBand: Codable, Equatable, Sendable {
         gain = try container.decode(Float.self, forKey: .gain)
         bandwidth = try container.decode(Float.self, forKey: .bandwidth)
         filterType = try container.decodeIfPresent(FilterType.self, forKey: .filterType) ?? .parametric
+        muted = false
+        id = UUID()
+    }
+
+    /// Equality ignores `id` and `muted` — they are runtime-only state, not part of preset value identity.
+    static func == (lhs: EQBand, rhs: EQBand) -> Bool {
+        lhs.frequency == rhs.frequency &&
+        lhs.gain == rhs.gain &&
+        lhs.bandwidth == rhs.bandwidth &&
+        lhs.filterType == rhs.filterType
     }
 }
 
