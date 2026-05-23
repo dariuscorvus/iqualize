@@ -39,10 +39,6 @@ final class DreamViewModel {
     var theme: DreamThemePreference = .auto
     var editing: EditingTarget?
 
-    // MARK: - Reorder drag state (handle row)
-
-    var reorderDrag: ReorderDrag?
-
     // MARK: - Audio mirror (rebuilt from audioEngine on change)
 
     var bands: [EQBand] = []
@@ -479,25 +475,6 @@ final class DreamViewModel {
         }
     }
 
-    func reorderBands(fromID: UUID, toIndex: Int) {
-        let sorted = displayBands
-        guard let fromIdx = sorted.firstIndex(where: { $0.id == fromID }) else { return }
-        let clamped = max(0, min(sorted.count - 1, toIndex))
-        guard clamped != fromIdx else { return }
-        mutate("Reorder Bands") {
-            var reord = sorted
-            let moved = reord.remove(at: fromIdx)
-            reord.insert(moved, at: clamped)
-            // Reassign frequencies to the new positions, preserving the original ascending sequence.
-            let originalFreqs = sorted.map(\.frequency).sorted()
-            for (newPos, b) in reord.enumerated() {
-                if let i = self.bands.firstIndex(where: { $0.id == b.id }) {
-                    self.bands[i].frequency = originalFreqs[newPos]
-                }
-            }
-        }
-    }
-
     // MARK: - Mutations: preset
 
     func loadPreset(id: UUID) {
@@ -842,9 +819,4 @@ struct EditingTarget: Equatable {
 
 enum ReadoutField: Equatable {
     case gain, frequency, bandwidth
-}
-
-struct ReorderDrag: Equatable {
-    let bandID: UUID
-    var dropIndex: Int?
 }

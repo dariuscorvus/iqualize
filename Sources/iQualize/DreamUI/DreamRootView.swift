@@ -16,7 +16,6 @@ struct DreamRootView: View {
             VStack(spacing: 0) {
                 EQCanvasView(vm: vm)
                 EQReadoutGrid(vm: vm)
-                    .coordinateSpace(name: "readouts")
             }
             .overlay(alignment: .top)    { theme.line.frame(height: 1) }
             .overlay(alignment: .bottom) { theme.line.frame(height: 1) }

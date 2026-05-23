@@ -14,7 +14,6 @@ struct EQReadoutGrid: View {
             row(for: .frequency, bands: bands)
             row(for: .bandwidth, bands: bands)
             typeRow(bands: bands)
-            handleRow(bands: bands)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -37,18 +36,6 @@ struct EQReadoutGrid: View {
                 TypeCell(vm: vm, band: b)
             }
         }
-    }
-
-    @ViewBuilder
-    private func handleRow(bands: [EQBand]) -> some View {
-        GeometryReader { proxy in
-            HStack(spacing: 4) {
-                ForEach(bands, id: \.id) { b in
-                    HandleCell(vm: vm, band: b, rowWidth: proxy.size.width, totalCount: bands.count)
-                }
-            }
-        }
-        .frame(height: 14)
     }
 }
 
@@ -297,67 +284,6 @@ struct TypeCell: View {
         case .bandPass:   return "Band Pass"
         case .notch:      return "Notch"
         }
-    }
-}
-
-// MARK: - Reorder handle
-
-@available(macOS 14.2, *)
-struct HandleCell: View {
-    let vm: DreamViewModel
-    let band: EQBand
-    let rowWidth: CGFloat
-    let totalCount: Int
-
-    @Environment(\.dreamTheme) private var theme
-    @State private var hover = false
-    @State private var dragX: CGFloat? = nil
-
-    var body: some View {
-        let dragging = vm.reorderDrag?.bandID == band.id
-        ZStack {
-            // 6-dot grip
-            VStack(spacing: 2) {
-                ForEach(0..<2, id: \.self) { _ in
-                    HStack(spacing: 2) {
-                        ForEach(0..<3, id: \.self) { _ in
-                            Circle()
-                                .fill(dragging ? .white : theme.textMute)
-                                .frame(width: 2, height: 2)
-                        }
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(dragging ? theme.accent : (hover ? theme.bgReadoutHover : theme.bgReadout))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 5)
-                .strokeBorder(dragging ? theme.accent : theme.line, lineWidth: 1)
-        )
-        .onHover { hover = $0 }
-        .gesture(
-            DragGesture(coordinateSpace: .named("readouts"))
-                .onChanged { v in
-                    if vm.reorderDrag?.bandID != band.id {
-                        vm.reorderDrag = ReorderDrag(bandID: band.id, dropIndex: nil)
-                    }
-                    let cellW = rowWidth / CGFloat(max(1, totalCount))
-                    let idx = max(0, min(totalCount - 1, Int(v.location.x / cellW)))
-                    if vm.reorderDrag?.dropIndex != idx {
-                        vm.reorderDrag = ReorderDrag(bandID: band.id, dropIndex: idx)
-                    }
-                }
-                .onEnded { _ in
-                    if let drag = vm.reorderDrag, let idx = drag.dropIndex {
-                        vm.reorderBands(fromID: drag.bandID, toIndex: idx)
-                    }
-                    vm.reorderDrag = nil
-                }
-        )
     }
 }
 
