@@ -15,10 +15,40 @@ func capture_helperURL() -> URL {
         .appendingPathComponent("Contents/Helpers/iQualizeCapture")
 }
 
+private func transportTypeName(_ t: UInt32) -> String {
+    switch t {
+    case kAudioDeviceTransportTypeBluetooth:   return "Bluetooth"
+    case kAudioDeviceTransportTypeBluetoothLE: return "BluetoothLE"
+    case kAudioDeviceTransportTypeBuiltIn:     return "BuiltIn"
+    case kAudioDeviceTransportTypeUSB:         return "USB"
+    case kAudioDeviceTransportTypeHDMI:        return "HDMI"
+    case kAudioDeviceTransportTypeDisplayPort: return "DisplayPort"
+    case kAudioDeviceTransportTypeAirPlay:     return "AirPlay"
+    case kAudioDeviceTransportTypeThunderbolt: return "Thunderbolt"
+    case kAudioDeviceTransportTypeAggregate:   return "Aggregate"
+    case kAudioDeviceTransportTypeVirtual:     return "Virtual"
+    case kAudioDeviceTransportTypeAVB:         return "AVB"
+    case kAudioDeviceTransportTypeFireWire:    return "FireWire"
+    case kAudioDeviceTransportTypePCI:         return "PCI"
+    case kAudioDeviceTransportTypeUnknown:     return "Unknown"
+    default:                                   return "0x" + String(t, radix: 16)
+    }
+}
+
+private func readUInt32(_ deviceID: AudioDeviceID,
+                        _ selector: AudioObjectPropertySelector,
+                        scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeOutput) -> UInt32 {
+    var addr = AudioObjectPropertyAddress(mSelector: selector, mScope: scope,
+                                          mElement: kAudioObjectPropertyElementMain)
+    var value: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &value)
+    return value
+}
+
 /// Set the I/O buffer frame size on a device's output scope. Lower values
 /// reduce latency at the cost of higher CPU and risk of dropouts. Devices
-/// silently clamp to their allowed range. We ignore failures because some
-/// devices don't permit changing this at all.
+/// silently clamp to their allowed range.
 func setBufferFrameSize(forDevice deviceID: AudioDeviceID, frames: UInt32) {
     var addr = AudioObjectPropertyAddress(
         mSelector: kAudioDevicePropertyBufferFrameSize,
@@ -26,23 +56,80 @@ func setBufferFrameSize(forDevice deviceID: AudioDeviceID, frames: UInt32) {
         mElement: kAudioObjectPropertyElementMain
     )
     var size = frames
-    let status = AudioObjectSetPropertyData(
+    _ = AudioObjectSetPropertyData(
         deviceID, &addr, 0, nil,
         UInt32(MemoryLayout<UInt32>.size), &size
     )
-    if status != noErr {
-        os_log(.default, log: appLog,
-               "setBufferFrameSize(%{public}u) on device %{public}d failed: OSStatus %{public}d (ignored)",
-               frames, deviceID, status)
-        return
+}
+
+/// Log a per-device latency breakdown so the user can see exactly where the
+/// audible delay is coming from for their current output. Reads buffer size,
+/// the device's reported latency (`kAudioDevicePropertyLatency`), stream
+/// latency, and safety-offset frames. Sum tells you the round-trip latency
+/// from "engine renders sample" to "speaker emits sample" — for Bluetooth
+/// devices this is dominated by the device-reported latency.
+func logDeviceLatencyBreakdown(deviceID: AudioDeviceID, label: String) {
+    let name = (try? getDeviceName(deviceID)) ?? "?"
+    let transport = readUInt32(deviceID, kAudioDevicePropertyTransportType,
+                               scope: kAudioObjectPropertyScopeGlobal)
+
+    // Nominal sample rate — used to convert frames into milliseconds.
+    var srAddr = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var sr: Float64 = 0
+    var srSize = UInt32(MemoryLayout<Float64>.size)
+    AudioObjectGetPropertyData(deviceID, &srAddr, 0, nil, &srSize, &sr)
+    let rate = sr > 0 ? sr : 48000
+
+    // Buffer frame size + the device's allowed range.
+    let buf = readUInt32(deviceID, kAudioDevicePropertyBufferFrameSize)
+    var rangeAddr = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyBufferFrameSizeRange,
+        mScope: kAudioObjectPropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var range = AudioValueRange()
+    var rangeSize = UInt32(MemoryLayout<AudioValueRange>.size)
+    AudioObjectGetPropertyData(deviceID, &rangeAddr, 0, nil, &rangeSize, &range)
+
+    // Device-reported latency + safety offset (additional fixed delay added
+    // for the playback path on top of the buffer).
+    let devLatency = readUInt32(deviceID, kAudioDevicePropertyLatency)
+    let safetyOffset = readUInt32(deviceID, kAudioDevicePropertySafetyOffset)
+
+    // Stream-level latency on output streams. Most devices have a single
+    // output stream; we sum across whatever exists.
+    var streamsAddr = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyStreams,
+        mScope: kAudioObjectPropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var streamsSize: UInt32 = 0
+    AudioObjectGetPropertyDataSize(deviceID, &streamsAddr, 0, nil, &streamsSize)
+    let streamCount = Int(streamsSize) / MemoryLayout<AudioObjectID>.size
+    var streams = [AudioObjectID](repeating: 0, count: streamCount)
+    AudioObjectGetPropertyData(deviceID, &streamsAddr, 0, nil, &streamsSize, &streams)
+    var streamLatency: UInt32 = 0
+    for s in streams {
+        streamLatency &+= readUInt32(s, kAudioStreamPropertyLatency,
+                                     scope: kAudioObjectPropertyScopeGlobal)
     }
-    // Read back the actual size (device may have clamped).
-    var actual: UInt32 = 0
-    var asize = UInt32(MemoryLayout<UInt32>.size)
-    AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &asize, &actual)
-    os_log(.default, log: appLog,
-           "output buffer frame size: requested=%{public}u actual=%{public}u",
-           frames, actual)
+
+    let totalFrames = buf &+ devLatency &+ safetyOffset &+ streamLatency
+    func ms(_ frames: UInt32) -> Double { Double(frames) / rate * 1000.0 }
+    let summary = String(
+        format: "%@: name=%@ transport=%@ sr=%.0f  buffer=%u (%.2fms; range %.0f..%.0f)  device-latency=%u (%.2fms)  stream-latency=%u (%.2fms)  safety-offset=%u (%.2fms)  TOTAL=%.2fms",
+        label, name, transportTypeName(transport), rate,
+        buf, ms(buf), range.mMinimum, range.mMaximum,
+        devLatency, ms(devLatency),
+        streamLatency, ms(streamLatency),
+        safetyOffset, ms(safetyOffset),
+        ms(totalFrames)
+    )
+    os_log(.default, log: appLog, "%{public}@", summary)
 }
 
 // MARK: - Real-time Audio Callbacks (free functions, no actor isolation)
@@ -281,6 +368,7 @@ final class AudioEngine {
         // devices that allow setting BufferFrameSize and we ignore failures
         // — some devices clamp to their own minimum.
         setBufferFrameSize(forDevice: outputDeviceID, frames: 256)
+        logDeviceLatencyBreakdown(deviceID: outputDeviceID, label: "output device")
 
         let avEngine = AVAudioEngine()
 
@@ -486,6 +574,10 @@ final class AudioEngine {
                 os_log(.default, log: appLog,
                        "idled engine: default switched to non-preferred (%{public}@); waiting for preferred to return",
                        currentUID ?? "?")
+                if let id = try? getDefaultOutputDeviceID() {
+                    logDeviceLatencyBreakdown(deviceID: id,
+                                              label: "fallback device (engine idle)")
+                }
             }
         }
     }
@@ -525,9 +617,12 @@ final class AudioEngine {
         stopSilenceMonitor()  // belt-and-suspenders
         engineSilenced = false
         lastNonSilentDate = Date()
-        // 50ms cadence: when audio resumes after silence, we want to wake the
-        // engine fast. 250ms felt like a noticeable half-second gap to users.
-        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+        // 10ms cadence: the cheapest way to drive resume latency down. The
+        // peek+compare is microseconds of work, so the CPU cost of polling
+        // 100 Hz is negligible. Doesn't help the AirPods BT codec floor
+        // (~150ms inherent), but does help wired/built-in playback feel near
+        // instant on resume.
+        let timer = Timer(timeInterval: 0.01, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.checkSilence()
             }
