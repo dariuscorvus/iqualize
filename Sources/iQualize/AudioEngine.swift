@@ -96,6 +96,19 @@ final class AudioEngine {
     private(set) var outputDeviceName = "Unknown"
     private(set) var error: String?
 
+    /// The user wants EQ enabled. Distinct from `isRunning` (which reflects
+    /// whether the engine is currently rendering) — when AirPods leave to
+    /// iPhone, we stop the engine but `userEnabled` stays true so we resume
+    /// automatically when AirPods return.
+    private var userEnabled = false
+
+    /// UID of the output device the user was on when EQ was enabled. Set in
+    /// the first start(), cleared in setEnabled(false). On route change, we
+    /// only follow the new default if it matches this UID — otherwise we
+    /// idle the engine, freeing the fallback device so the user's preferred
+    /// output (typically AirPods) can return via Continuity.
+    private var preferredOutputUID: String?
+
     // Capture lives in a separate helper process (see CaptureClient.swift +
     // Sources/iQualizeCapture/main.swift). This main process owns no CATap,
     // no aggregate, no IOProc — only the AVAudioEngine output. That separation
@@ -111,6 +124,12 @@ final class AudioEngine {
     nonisolated(unsafe) private var deviceChangeListenerBlock: AudioObjectPropertyListenerBlock?
     @ObservationIgnored
     private var configChangeObserver: NSObjectProtocol?
+    @ObservationIgnored
+    private var silenceTimer: Timer?
+    @ObservationIgnored
+    private var engineSilenced = false
+    @ObservationIgnored
+    private var lastNonSilentDate = Date()
     var onStateChange: (() -> Void)?
 
     // Spectrum analyzers — one per tap point
@@ -191,6 +210,14 @@ final class AudioEngine {
 
         let outputDeviceID = try getDefaultOutputDeviceID()
         outputDeviceName = try getDeviceName(outputDeviceID)
+
+        // First time around (user just toggled EQ on), remember this device
+        // as the user's preferred output. On subsequent restarts from a
+        // route-change handler we keep the original preferred so we can
+        // tell "AirPods came back" from "user just enabled EQ on Teufel".
+        if preferredOutputUID == nil {
+            preferredOutputUID = try? getDeviceUID(outputDeviceID)
+        }
 
         // 1. Launch the capture helper — it owns the CATap, aggregate, and
         //    IOProc in a separate process. We just consume its shared-memory
@@ -325,11 +352,22 @@ final class AudioEngine {
         }
 
         isRunning = true
+
+        // Silence-yield monitor: when the helper's ring buffer has no audio
+        // activity for >2s, stop the engine so it releases the default output
+        // device. With no app rendering, macOS keeps the user's preferred
+        // device as default even when it's unavailable (AirPods on iPhone),
+        // which is what makes auto-return work. When non-silent audio appears,
+        // we restart the engine — it rebinds to whatever the current default
+        // is (typically the returned AirPods).
+        startSilenceMonitor()
     }
 
     func stop() {
         guard isRunning else { return }
         isRunning = false
+
+        stopSilenceMonitor()
 
         if let configChangeObserver {
             NotificationCenter.default.removeObserver(configChangeObserver)
@@ -356,35 +394,166 @@ final class AudioEngine {
         captureClient = nil
     }
 
-    /// Rebuild the engine after AVAudioEngine reports its configuration changed.
-    /// Routes through stop() + start() so we re-bind to whatever the system's
-    /// current default output is. Reuses `isRestarting` to coalesce with the
-    /// default-device listener and prevent re-entrance.
-    private func restartAfterConfigChange() {
-        guard !isRestarting, isRunning else { return }
-        isRestarting = true
-        stop()
-        do {
-            try start()
-        } catch {
-            self.error = error.localizedDescription
+    /// Called from both AVAudioEngineConfigurationChange and the default-output
+    /// listener. Decides whether to follow the route change.
+    ///
+    /// Key insight: if AirPods migrate to iPhone, macOS picks a fallback
+    /// default (e.g., Teufel speakers). If iQualize FOLLOWS the fallback and
+    /// keeps rendering there, the fallback stays busy and AirPods can't return
+    /// to the Mac via Continuity. If iQualize IDLES on non-preferred fallbacks,
+    /// the fallback is free and AirPods auto-return when iPhone is silent.
+    private func reactToRouteChange() {
+        guard !isRestarting else { return }
+        guard userEnabled else { return }
+
+        let currentUID: String?
+        if let deviceID = try? getDefaultOutputDeviceID() {
+            outputDeviceName = (try? getDeviceName(deviceID)) ?? outputDeviceName
+            currentUID = try? getDeviceUID(deviceID)
+        } else {
+            currentUID = nil
         }
-        isRestarting = false
-        onStateChange?()
+
+        let matchesPreferred = (preferredOutputUID == nil)
+            || (currentUID == preferredOutputUID)
+
+        isRestarting = true
+        defer {
+            isRestarting = false
+            onStateChange?()
+        }
+
+        if matchesPreferred {
+            // Either we have no preferred yet (first time), or current default
+            // is the user's preferred device. Bring engine up on it.
+            if isRunning {
+                stop()
+            }
+            do {
+                try start()
+            } catch {
+                os_log(.error, log: appLog,
+                       "reactToRouteChange: start() failed: %{public}@",
+                       error.localizedDescription)
+                self.error = error.localizedDescription
+                cleanupPartialStart()
+            }
+        } else {
+            // Default switched to a fallback device. Idle the engine so we
+            // don't keep the fallback busy — that's what blocks AirPods from
+            // returning. preferredOutputUID is preserved so we can detect
+            // the user's device coming back via this same listener.
+            if isRunning {
+                stop()
+                os_log(.default, log: appLog,
+                       "idled engine: default switched to non-preferred (%{public}@); waiting for preferred to return",
+                       currentUID ?? "?")
+            }
+        }
     }
+
+    private func restartAfterConfigChange() { reactToRouteChange() }
 
     // MARK: - EQ Control
 
     func setEnabled(_ enabled: Bool) {
         if enabled {
+            userEnabled = true
             do {
                 try start()
             } catch {
+                os_log(.error, log: appLog,
+                       "start() failed: %{public}@",
+                       error.localizedDescription)
                 self.error = error.localizedDescription
+                cleanupPartialStart()
             }
         } else {
+            userEnabled = false
+            preferredOutputUID = nil
             stop()
         }
+    }
+
+    // MARK: - Silence-yield
+
+    // ~-40 dBFS. Empirically the helper's ring buffer floats around 0.01 even
+    // with no app actively playing (system sounds, background processes, etc).
+    // 0.03 filters that out while still triggering on quiet music.
+    private static let silenceThreshold: Float = 0.03
+    private static let silenceGracePeriod: TimeInterval = 2.0
+
+    private func startSilenceMonitor() {
+        stopSilenceMonitor()  // belt-and-suspenders
+        engineSilenced = false
+        lastNonSilentDate = Date()
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.checkSilence()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        silenceTimer = timer
+    }
+
+    private func stopSilenceMonitor() {
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+        engineSilenced = false
+    }
+
+    private func checkSilence() {
+        guard let engine, let client = captureClient else { return }
+        let peak = client.peekRecentPeak(window: 4096)
+        let now = Date()
+
+        if peak >= AudioEngine.silenceThreshold {
+            lastNonSilentDate = now
+            if engineSilenced {
+                // Audio returned — start engine. It rebinds to whatever the
+                // current default output is (typically AirPods returning).
+                do {
+                    try engine.start()
+                    engineSilenced = false
+                    os_log(.default, log: appLog, "engine resumed (audio activity)")
+                } catch {
+                    os_log(.error, log: appLog,
+                           "engine resume failed: %{public}@",
+                           error.localizedDescription)
+                }
+            }
+        } else if !engineSilenced
+                  && now.timeIntervalSince(lastNonSilentDate) >= AudioEngine.silenceGracePeriod {
+            // Silent for the grace period — stop the engine, freeing the
+            // default device so macOS doesn't have to switch defaults when
+            // AirPods leave.
+            engine.stop()
+            engineSilenced = true
+            os_log(.default, log: appLog, "engine paused (sustained silence)")
+        }
+    }
+
+    /// Tear down anything that may have been partially initialised by a
+    /// failed start(). Mirrors stop()'s cleanup but doesn't gate on
+    /// isRunning (start() throws before isRunning is set).
+    private func cleanupPartialStart() {
+        stopSilenceMonitor()
+        if let configChangeObserver {
+            NotificationCenter.default.removeObserver(configChangeObserver)
+            self.configChangeObserver = nil
+        }
+        rtCaptureClient = nil
+        rtBiquadChainL = nil
+        rtBiquadChainR = nil
+        sourceNode?.removeTap(onBus: 0)
+        eq?.removeTap(onBus: 0)
+        sourceNode = nil
+        engine?.stop()
+        engine = nil
+        eq = nil
+        limiter = nil
+        captureClient?.stop()
+        captureClient = nil
     }
 
     private func applyBands(from old: EQPresetData? = nil) {
@@ -480,24 +649,6 @@ final class AudioEngine {
     private var isRestarting = false
 
     private func handleDeviceChange() {
-        guard !isRestarting else { return }
-
-        if let deviceID = try? getDefaultOutputDeviceID(),
-           let name = try? getDeviceName(deviceID) {
-            outputDeviceName = name
-        }
-
-        if isRunning {
-            isRestarting = true
-            stop()
-            do {
-                try start()
-            } catch {
-                self.error = error.localizedDescription
-            }
-            isRestarting = false
-        }
-
-        onStateChange?()
+        reactToRouteChange()
     }
 }

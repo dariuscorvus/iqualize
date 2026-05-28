@@ -23,11 +23,6 @@ private let capLog = OSLog(subsystem: "com.iqualize", category: "capture-helper"
 
 // Swift's auto-imported shm_open is unavailable because the POSIX
 // declaration is variadic. Re-declare as a fixed-arity C function.
-@_silgen_name("shm_open")
-private func c_shm_open(_ name: UnsafePointer<CChar>,
-                        _ oflag: Int32,
-                        _ mode: mode_t) -> Int32
-
 // MARK: - Shared layout
 
 struct SharedHeader {
@@ -41,7 +36,11 @@ struct SharedHeader {
 
 // MARK: - State (all nonisolated for the IOProc + signal handlers)
 
-nonisolated(unsafe) var shmName: String = "/iqualize-cap-\(getpid())"
+// File-backed shared memory in /tmp. Cross-process access works via standard
+// POSIX file permissions — no POSIX-shm namespace quirks (which empirically
+// reject O_RDWR between two binaries with different code-signing identifiers
+// on macOS, even with 0o666 + fchmod).
+nonisolated(unsafe) var shmPath: String = "/tmp/iqualize-cap-\(getpid()).bin"
 nonisolated(unsafe) var shmFD: Int32 = -1
 nonisolated(unsafe) var shmTotalSize: size_t = 0
 nonisolated(unsafe) var headerPtr: UnsafeMutablePointer<SharedHeader>? = nil
@@ -84,7 +83,7 @@ func caCheckExit(_ status: OSStatus, _ msg: String, code: Int32) {
             munmap(UnsafeMutableRawPointer(h), shmTotalSize)
         }
         close(shmFD)
-        shm_unlink(shmName)
+        unlink(shmPath)
     }
 }
 
@@ -159,12 +158,15 @@ func run() {
     let dataBytes = dataFloatsPow2 * MemoryLayout<Float>.size
     shmTotalSize = size_t(headerSize + dataBytes)
 
-    shm_unlink(shmName)
-    shmFD = shmName.withCString { c_shm_open($0, O_CREAT | O_RDWR, 0o600) }
+    unlink(shmPath)
+    shmFD = shmPath.withCString { open($0, O_CREAT | O_RDWR, 0o666) }
     if shmFD < 0 {
-        stderrLog("[capture] shm_open failed: errno=\(errno)")
+        stderrLog("[capture] open(\(shmPath)) failed: errno=\(errno)")
         cleanup(); exit(20)
     }
+    // Belt-and-suspenders for cross-process access between differently
+    // signed binaries: explicit fchmod after creation.
+    _ = fchmod(shmFD, 0o666)
     if ftruncate(shmFD, off_t(shmTotalSize)) != 0 {
         stderrLog("[capture] ftruncate failed: errno=\(errno)")
         cleanup(); exit(21)
@@ -258,7 +260,7 @@ func run() {
     // 6. Handshake to parent — use raw write(2) to avoid any Foundation
     //    FileHandle buffering quirks that may arise when our stdout is a pipe.
     let handshake: [String: Any] = [
-        "shmName": shmName,
+        "shmPath": shmPath,
         "totalSize": shmTotalSize,
         "headerSize": headerSize,
         "sampleRate": sampleRate,
@@ -306,10 +308,24 @@ func run() {
     stdinThread.start()
 }
 
-// Install signal handlers BEFORE any work.
-signal(SIGTERM) { _ in cleanup(); exit(0) }
-signal(SIGINT)  { _ in cleanup(); exit(0) }
-signal(SIGHUP)  { _ in cleanup(); exit(0) }
+// Dispatch-based signal handling. C signal handlers run in a context where
+// only async-signal-safe functions are allowed; AudioDeviceStop and friends
+// are not, so calling cleanup() directly from signal(2) trips Swift's
+// dispatch isolation check (EXC_BREAKPOINT). Mask the signals via signal(SIG_IGN)
+// so the default action doesn't terminate us, then handle them on a dispatch
+// queue where we can call CoreAudio APIs safely.
+signal(SIGTERM, SIG_IGN)
+signal(SIGINT,  SIG_IGN)
+signal(SIGHUP,  SIG_IGN)
+
+let signalQueue = DispatchQueue(label: "com.iqualize.capture.signals")
+let sigTerm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: signalQueue)
+let sigInt  = DispatchSource.makeSignalSource(signal: SIGINT,  queue: signalQueue)
+let sigHup  = DispatchSource.makeSignalSource(signal: SIGHUP,  queue: signalQueue)
+for src in [sigTerm, sigInt, sigHup] {
+    src.setEventHandler { cleanup(); exit(0) }
+    src.resume()
+}
 
 if #available(macOS 14.2, *) {
     run()

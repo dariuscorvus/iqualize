@@ -10,11 +10,6 @@ import Foundation
 import Darwin
 import os.log
 
-@_silgen_name("shm_open")
-private func c_shm_open(_ name: UnsafePointer<CChar>,
-                        _ oflag: Int32,
-                        _ mode: mode_t) -> Int32
-
 private let clientLog = OSLog(subsystem: "com.iqualize", category: "capture-client")
 
 // Must match Sources/iQualizeCapture/main.swift exactly.
@@ -112,7 +107,7 @@ final class CaptureClient: @unchecked Sendable {
         let json = try JSONSerialization.jsonObject(with: lineData) as? [String: Any] ?? [:]
         os_log(.default, log: clientLog, "parsed JSON keys=%{public}@",
                json.keys.sorted().joined(separator: ","))
-        guard let shmName = json["shmName"] as? String,
+        guard let shmPath = json["shmPath"] as? String,
               let totalSize = json["totalSize"] as? Int,
               let headerSize = json["headerSize"] as? Int,
               let sr = json["sampleRate"] as? Double,
@@ -124,14 +119,14 @@ final class CaptureClient: @unchecked Sendable {
         }
         os_log(.default, log: clientLog,
                "handshake parsed: shm=%{public}@ size=%{public}d sr=%{public}.0f ch=%{public}d",
-               shmName, totalSize, sr, ch)
+               shmPath, totalSize, sr, ch)
 
-        // Open the same shared memory region the helper created.
-        let fd = shmName.withCString { c_shm_open($0, O_RDWR, 0o600) }
+        // Open the file-backed shared memory region the helper created.
+        let fd = shmPath.withCString { open($0, O_RDWR) }
         if fd < 0 {
             throw NSError(domain: "iQualize", code: -104,
                           userInfo: [NSLocalizedDescriptionKey:
-                                     "shm_open(\(shmName)) failed: errno \(errno)"])
+                                     "open(\(shmPath)) failed: errno \(errno)"])
         }
         shmFD = fd
 
@@ -179,6 +174,28 @@ final class CaptureClient: @unchecked Sendable {
         }
         headerPtr = nil
         dataPtr = nil
+    }
+
+    /// Peek at the most recent `window` samples without advancing the read
+    /// head. Returns the maximum absolute amplitude (∈ [0, 1]). Used by the
+    /// silence-yield monitor to decide whether to keep the AVAudioEngine
+    /// running. Safe to call concurrently with read() — both only do plain
+    /// memory access on the mmap'd region.
+    func peekRecentPeak(window: Int = 2048) -> Float {
+        guard let header = headerPtr, let data = dataPtr else { return 0 }
+        let writeHead = header.pointee.writeHead
+        let m = mask
+        let n = UInt64(window)
+        let span = min(n, writeHead)
+        let start = writeHead &- span
+        var peak: Float = 0
+        var i = start
+        while i != writeHead {
+            let v = abs(data[Int(i & m)])
+            if v > peak { peak = v }
+            i &+= 1
+        }
+        return peak
     }
 
     /// Read up to `count` interleaved Float32 samples. Returns the actual
