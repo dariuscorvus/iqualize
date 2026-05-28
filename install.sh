@@ -11,15 +11,29 @@ APP=/Applications/iQualize.app
 BIN="$APP/Contents/MacOS/iQualize"
 SRC="$(swift build -c release --show-bin-path)/iQualize"
 
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+HELPER_BIN="$APP/Contents/Helpers/iQualizeCapture"
+HELPER_SRC="$(swift build -c release --show-bin-path)/iQualizeCapture"
+
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
+
+SIGN_ID="Apple Development"
+
+# Install + sign the capture helper FIRST (main binary's enclosing signature
+# covers the helper, so the helper must already be in place when we sign the
+# main bundle below).
+if [ -f "$HELPER_BIN" ] && cmp -s "$HELPER_SRC" "$HELPER_BIN"; then
+    echo "Helper unchanged"
+else
+    cp -f "$HELPER_SRC" "$HELPER_BIN"
+    # Sign helper with its own entitlements (gets TCC for CATap separately).
+    codesign --force --sign "$SIGN_ID" --entitlements iQualizeCapture.entitlements "$HELPER_BIN" 2>/dev/null && echo "Helper signed"
+fi
 
 # Only replace binary if it actually changed — preserves TCC permissions (cdhash stays the same)
 if [ -f "$BIN" ] && cmp -s "$SRC" "$BIN"; then
     echo "Binary unchanged — skipping copy (TCC permissions preserved)"
 else
     cp -f "$SRC" "$BIN"
-    # Codesign with stable identity
-    SIGN_ID="Apple Development"
     if [ -n "$SIGN_ID" ]; then
         codesign --force --sign "$SIGN_ID" --entitlements iQualize.entitlements "$APP" 2>/dev/null && echo "Signed with: $SIGN_ID"
     fi
