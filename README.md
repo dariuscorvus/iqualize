@@ -68,7 +68,7 @@ open /Applications/iQualize.app
 
 - Add bands with + buttons on either side of the EQ — new band copies the leftmost or rightmost band
 - Right-click context menu: Add Suggested Band finds the largest frequency gap and inserts a new band at the geometric midpoint
-- Delete, reorder via drag-and-drop or right-click context menu (Move Left/Right)
+- Delete, or reorder via the right-click context menu (Move Left/Right)
 - Minimum 1 band, maximum 31
 
 ### Presets
@@ -132,7 +132,7 @@ Accessible via the gear icon in the EQ window, the Settings item in the menu bar
 
 - **Audio**: Peak Limiter toggle, Max Gain range (±6/12/18/24 dB), Auto Scale toggle
 - **Display**: Pre-EQ / Post-EQ spectrum toggles, per-spectrum line color picker, per-spectrum Fill toggle with its own color picker, reset buttons to return to the dynamic system colors, Q / Octave bandwidth display toggle
-- **General**: Hide from Dock toggle, Start at Login toggle
+- **General**: Theme (Auto / Light / Dark), Hide from Dock toggle, Start at Login toggle
 
 ### Spectrum Analyzer
 
