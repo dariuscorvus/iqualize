@@ -35,6 +35,8 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
         audioEngine.maxGainDB = state.maxGainDB
         audioEngine.bypassed = state.bypassed
         audioEngine.balance = state.balance
+        audioEngine.inputGainDB = state.inputGainDB
+        audioEngine.outputGainDB = state.outputGainDB
         audioEngine.setEnabled(true)
         updateIcon()
 
