@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.32.0] - 2026-06-29
+
+### Fixed
+- In/Out gain is now applied at startup. Previously the saved input/output gain was not pushed to the audio engine on launch, so audio played at unadjusted levels until the EQ window was opened for the first time (#74)
+
 ## [0.31.0] - 2026-06-29
 
 ### Changed
@@ -15,6 +20,25 @@ All notable changes to iQualize will be documented in this file.
 - Inline cell editing and the empty-checkbox fill are now legible in Light mode (previously white-on-light)
 - Re-selecting a band's current filter type no longer forks a built-in preset to "(Custom)" or pushes a redundant undo step
 - Undo now clears the "modified" dirty dot once the EQ curve is back to the saved values (a phantom dot previously lingered after undoing a built-in→Custom fork)
+
+## [0.30.2] - 2026-05-23
+
+### Fixed
+- Removed the unused band-reorder grab-handle row from the Dream EQ readout grid (#70)
+
+## [0.30.1] - 2026-05-08
+
+### Fixed
+- Dream UI filter-type dropdown now reliably opens, commits the selection, and stays cell-width
+
+## [0.30.0] - 2026-05-02
+
+### Changed
+- **Brand-new SwiftUI "Dream" EQ window** — the EQ surface was rebuilt from scratch on a SwiftUI `Canvas`, replacing the old AppKit drawing internals while keeping the same audio engine, preset store, and persisted state. The chart renders dB/Hz axes, real pre/post-EQ spectrum, smoothed Catmull-Rom traces, per-band ghost responses, and a live composite curve, with draggable knobs and bandwidth handles directly on the canvas.
+- Band values now live in a five-row readout grid below the canvas: single-click to activate a cell, scroll-wheel to adjust, inline editing, and a native filter-type dropdown.
+- Toolbar uses native macOS menus for the preset picker, the Save split-button, and the theme cycle; Import/Export and Save As use native dialogs.
+- Auto-scale dynamically resizes the dB axis to fit the composite curve, with vertical padding so the +max/−max labels don't clip.
+- Window opens at a tighter 880×600 (was 1200×740); the native title bar shows "iQualize — <preset>" with a dirty-marker dot for unsaved changes.
 
 ## [0.29.0] - 2026-05-02
 
