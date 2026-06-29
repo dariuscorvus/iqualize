@@ -106,12 +106,6 @@ final class DreamViewModel {
         }
     }
 
-    func persistTheme() {
-        var s = iQualizeState.load()
-        s.dreamTheme = theme.rawValue
-        s.save()
-    }
-
     func persistSnap() {
         var s = iQualizeState.load()
         s.snapToSemitone = snapToSemitone

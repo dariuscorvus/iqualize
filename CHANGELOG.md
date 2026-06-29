@@ -7,6 +7,8 @@ All notable changes to iQualize will be documented in this file.
 ### Changed
 - Dream EQ footer reorganized into two purpose-based rows with subtle group dividers: row 1 is signal (Bypass, Peak Limiter, In/Out/Balance, Channel, Output), row 2 is display (Pre-EQ, Post-EQ, Q/Oct, max gain, Auto-scale)
 - Add-band "+" buttons inset from the canvas edges so they no longer crowd the frame
+- Theme (Auto/Light/Dark) moved out of the EQ toolbar into Settings → General — it's rarely changed, so the toolbar now carries just Snap and the gear
+- Snap toggle is now a magnet icon (icon-only, with a hover tooltip) instead of the "♪ Snap" label
 
 ### Fixed
 - "Out:" gain label no longer wraps onto a second line; In/Out/Bal labels and values share a consistent width

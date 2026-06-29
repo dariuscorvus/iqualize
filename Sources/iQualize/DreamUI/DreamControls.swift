@@ -203,6 +203,38 @@ struct DreamToolbarGroup<Content: View>: View {
     }
 }
 
+// MARK: - Magnet icon (SF Symbols has no `magnet` glyph on macOS 14–15, so draw a horseshoe)
+
+struct MagnetIcon: View {
+    var size: CGFloat = 14
+    var lineWidth: CGFloat = 1.7
+
+    var body: some View {
+        MagnetShape()
+            .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+            .frame(width: size, height: size)
+    }
+}
+
+private struct MagnetShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        // Reference geometry in a 24×24 box; horseshoe opening downward (tips at the bottom),
+        // matching the 🧲 orientation. Scaled to whatever frame we're given.
+        let s = min(rect.width, rect.height) / 24
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + x * s, y: rect.minY + y * s) }
+        var p = Path()
+        // Body: left prong up, arc over the top, right prong down.
+        p.move(to: pt(7, 20))
+        p.addLine(to: pt(7, 11))
+        p.addQuadCurve(to: pt(17, 11), control: pt(12, 2))
+        p.addLine(to: pt(17, 20))
+        // Pole caps at the two bottom tips.
+        p.move(to: pt(4.5, 20)); p.addLine(to: pt(9.5, 20))
+        p.move(to: pt(14.5, 20)); p.addLine(to: pt(19.5, 20))
+        return p
+    }
+}
+
 // MARK: - Filter type icon (mirrors FilterIcon paths in the JSX)
 
 struct FilterTypeIcon: View {
