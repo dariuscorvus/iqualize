@@ -61,7 +61,7 @@ struct ReadoutCell: View {
                 TextField("", text: $editingText, onCommit: commitEdit)
                     .textFieldStyle(.plain)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.scheme == .light ? theme.text : .white)
                     .font(.system(size: 11, design: .monospaced))
                     .focused($focused)
                     .onAppear {

@@ -87,7 +87,7 @@ struct DreamCheckbox: View {
             HStack(spacing: 5) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(isOn && !disabled ? theme.accent : Color.white.opacity(0.04))
+                        .fill(isOn && !disabled ? theme.accent : (theme.scheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.04)))
                         .overlay(
                             RoundedRectangle(cornerRadius: 3)
                                 .strokeBorder(isOn && !disabled ? theme.accent : theme.line2, lineWidth: 1)
@@ -106,6 +106,8 @@ struct DreamCheckbox: View {
                 Text(title)
                     .font(.system(size: 11))
                     .foregroundStyle(disabled ? theme.textMute : theme.textDim)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .opacity(disabled ? 0.4 : 1.0)
             .contentShape(Rectangle())
@@ -128,6 +130,8 @@ struct DreamSegment<Value: Hashable>: View {
                 Button(action: { selection = opt.value }) {
                     Text(opt.label)
                         .font(.system(size: 10.5))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 1.5)
                         .foregroundStyle(selection == opt.value ? .white : theme.textDim)

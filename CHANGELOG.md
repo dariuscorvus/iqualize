@@ -2,6 +2,16 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.31.0] - 2026-06-29
+
+### Changed
+- Dream EQ footer reorganized into two purpose-based rows with subtle group dividers: row 1 is signal (Bypass, Peak Limiter, In/Out/Balance, Channel, Output), row 2 is display (Pre-EQ, Post-EQ, Q/Oct, max gain, Auto-scale)
+- Add-band "+" buttons inset from the canvas edges so they no longer crowd the frame
+
+### Fixed
+- "Out:" gain label no longer wraps onto a second line; In/Out/Bal labels and values share a consistent width
+- Inline cell editing and the empty-checkbox fill are now legible in Light mode (previously white-on-light)
+
 ## [0.29.0] - 2026-05-02
 
 ### Added
