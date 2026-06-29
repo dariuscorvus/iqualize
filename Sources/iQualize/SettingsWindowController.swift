@@ -23,6 +23,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var preEqFillResetButton: NSButton!
     private var postEqFillResetButton: NSButton!
     private var bandwidthModeSegment: NSSegmentedControl!
+    private var themeSegment: NSSegmentedControl!
     private var hideFromDockCheckbox: NSButton!
     private var startAtLoginCheckbox: NSButton!
 
@@ -71,6 +72,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         postEqFillColorWell.color = (state.postEqFillColorHex.flatMap(NSColor.init(srgbHexRGB:))) ?? .systemOrange
         applyPostEqEnabled(!audioEngine.bypassed)
         bandwidthModeSegment.selectedSegment = state.showBandwidthAsQ ? 0 : 1
+        themeSegment.selectedSegment = Self.themeIndex(for: state.dreamTheme)
     }
 
     func syncBypass(_ on: Bool) {
@@ -195,6 +197,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // ── General ──
         let generalHeader = makeSectionHeader("General")
         mainStack.addArrangedSubview(generalHeader)
+
+        let themeRow = NSStackView()
+        themeRow.orientation = .horizontal
+        themeRow.spacing = 6
+
+        let themeLabel = NSTextField(labelWithString: "Theme:")
+        themeLabel.font = .systemFont(ofSize: 13)
+        themeRow.addArrangedSubview(themeLabel)
+
+        themeSegment = NSSegmentedControl(labels: ["Auto", "Light", "Dark"], trackingMode: .selectOne,
+                                          target: self, action: #selector(themeChanged(_:)))
+        themeSegment.selectedSegment = Self.themeIndex(for: state.dreamTheme)
+        themeRow.addArrangedSubview(themeSegment)
+
+        mainStack.addArrangedSubview(themeRow)
 
         hideFromDockCheckbox = NSButton(checkboxWithTitle: "Hide from Dock",
                                           target: self, action: #selector(toggleHideFromDock(_:)))
@@ -398,6 +415,31 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         state.showBandwidthAsQ = asQ
         state.save()
         eqWindowController?.syncBandwidthMode(asQ: asQ)
+    }
+
+    @objc private func themeChanged(_ sender: NSSegmentedControl) {
+        let preference = Self.themePreference(for: sender.selectedSegment)
+        var state = iQualizeState.load()
+        state.dreamTheme = preference.rawValue
+        state.save()
+        eqWindowController?.syncTheme(preference)
+    }
+
+    /// Map a persisted `dreamTheme` raw value to a segment index (0 = Auto, 1 = Light, 2 = Dark).
+    private static func themeIndex(for raw: String?) -> Int {
+        switch DreamThemePreference(rawValue: raw ?? "") {
+        case .light: return 1
+        case .dark:  return 2
+        default:     return 0
+        }
+    }
+
+    private static func themePreference(for index: Int) -> DreamThemePreference {
+        switch index {
+        case 1:  return .light
+        case 2:  return .dark
+        default: return .auto
+        }
     }
 
     @objc private func toggleHideFromDock(_ sender: NSButton) {

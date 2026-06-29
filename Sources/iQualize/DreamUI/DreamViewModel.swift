@@ -106,12 +106,6 @@ final class DreamViewModel {
         }
     }
 
-    func persistTheme() {
-        var s = iQualizeState.load()
-        s.dreamTheme = theme.rawValue
-        s.save()
-    }
-
     func persistSnap() {
         var s = iQualizeState.load()
         s.snapToSemitone = snapToSemitone
@@ -184,12 +178,17 @@ final class DreamViewModel {
         }
         audioEngine.activePreset = preset
         let wasModified = isModified
-        if savedSnapshot != preset {
-            isModified = true
-        } else {
-            isModified = false
-        }
+        isModified = !contentMatchesSaved(preset)
         if wasModified != isModified { onTitleShouldUpdate?() }
+    }
+
+    /// The dirty flag tracks whether the EQ *content* (band curves) differs from the saved
+    /// baseline — not the preset's identity (id / name / built-in flag). Comparing identity is
+    /// wrong across a built-in→"(Custom)" fork: undoing the fork restores the same curve under a
+    /// different identity and would otherwise leave a phantom dirty dot.
+    private func contentMatchesSaved(_ preset: EQPresetData) -> Bool {
+        guard let saved = savedSnapshot else { return false }
+        return preset.bands == saved.bands && preset.rightBands == saved.rightBands
     }
 
     // MARK: - Mutation helpers
@@ -363,17 +362,16 @@ final class DreamViewModel {
             guard let self else { return }
             let redoPreset = self.audioEngine.activePreset
             self.audioEngine.activePreset = oldPreset
+            // Set the dirty flag *before* syncing: syncFromAudioEngine() fires the title-update
+            // callback, which must see the corrected isModified value (otherwise the title keeps a
+            // stale dirty dot even though Reset is correctly disabled).
+            self.isModified = !self.contentMatchesSaved(oldPreset)
             self.syncFromAudioEngine()
-            if oldPreset == self.savedSnapshot {
-                self.isModified = false
-            } else {
-                self.isModified = true
-            }
             self.registerUndo(actionName: actionName, oldPreset: redoPreset)
         }
         undoManager.setActionName(actionName)
         // Ensure modified flag is correct after redo path.
-        isModified = (currentPreset != savedSnapshot)
+        isModified = !contentMatchesSaved(currentPreset)
     }
 
     // MARK: - Band lookups
@@ -390,10 +388,25 @@ final class DreamViewModel {
 
     func updateBand(id: UUID, frequency: Float? = nil, gain: Float? = nil, bandwidth: Float? = nil, filterType: FilterType? = nil, registerUndo: Bool = false) {
         guard let i = indexOfBand(id: id) else { return }
+        let cur = bands[i]
+        // Clamp the requested values the same way the mutation will, so the no-op check below
+        // compares apples to apples.
+        let newFreq = frequency.map { max(20, min(20000, $0)) }
+        let newGain = gain.map      { max(-gainClamp, min(gainClamp, $0)) }
+        let newBW   = bandwidth.map { max(0.05, min(8.0, $0)) }
+        // No-op guard: if nothing actually changes, don't mutate. This keeps re-selecting a band's
+        // current filter type (or nudging a value that's already at its clamp) from forking a
+        // built-in preset to "(Custom)" or pushing a redundant undo step.
+        let changes =
+            (newFreq.map     { $0 != cur.frequency }  ?? false) ||
+            (newGain.map     { $0 != cur.gain }       ?? false) ||
+            (newBW.map       { $0 != cur.bandwidth }  ?? false) ||
+            (filterType.map  { $0 != cur.filterType } ?? false)
+        guard changes else { return }
         let body = {
-            if let f = frequency { self.bands[i].frequency = max(20, min(20000, f)) }
-            if let g = gain      { self.bands[i].gain      = max(-self.gainClamp, min(self.gainClamp, g)) }
-            if let b = bandwidth { self.bands[i].bandwidth = max(0.05, min(8.0, b)) }
+            if let f = newFreq { self.bands[i].frequency = f }
+            if let g = newGain { self.bands[i].gain      = g }
+            if let b = newBW   { self.bands[i].bandwidth = b }
             if let t = filterType { self.bands[i].filterType = t }
         }
         if registerUndo {

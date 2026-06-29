@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // MARK: - tb-btn (toolbar button)
@@ -87,7 +88,7 @@ struct DreamCheckbox: View {
             HStack(spacing: 5) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(isOn && !disabled ? theme.accent : Color.white.opacity(0.04))
+                        .fill(isOn && !disabled ? theme.accent : (theme.scheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.04)))
                         .overlay(
                             RoundedRectangle(cornerRadius: 3)
                                 .strokeBorder(isOn && !disabled ? theme.accent : theme.line2, lineWidth: 1)
@@ -106,6 +107,8 @@ struct DreamCheckbox: View {
                 Text(title)
                     .font(.system(size: 11))
                     .foregroundStyle(disabled ? theme.textMute : theme.textDim)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .opacity(disabled ? 0.4 : 1.0)
             .contentShape(Rectangle())
@@ -128,6 +131,8 @@ struct DreamSegment<Value: Hashable>: View {
                 Button(action: { selection = opt.value }) {
                     Text(opt.label)
                         .font(.system(size: 10.5))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 1.5)
                         .foregroundStyle(selection == opt.value ? .white : theme.textDim)
@@ -197,6 +202,31 @@ struct DreamToolbarGroup<Content: View>: View {
         }
         .padding(.trailing, trailingDivider ? 4 : 0)
     }
+}
+
+// MARK: - Magnet icon
+
+/// Tabler's `magnet` glyph (SF Symbols has no `magnet` on macOS), rendered straight from its SVG
+/// as a template image so it tints with the control's foreground/accent color — the Snap toggle
+/// shows it in the text color when off and white when on.
+struct MagnetIcon: View {
+    var size: CGFloat = 15
+
+    var body: some View {
+        Image(nsImage: Self.image)
+            .renderingMode(.template)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
+    }
+
+    private static let image: NSImage = {
+        let svg = #"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 13V5a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v8a2 2 0 0 0 6 0V5a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v8a8 8 0 0 1-16 0m0-5h5m6 0h4"/></svg>"#
+        let img = NSImage(data: Data(svg.utf8)) ?? NSImage()
+        img.isTemplate = true
+        return img
+    }()
 }
 
 // MARK: - Filter type icon (mirrors FilterIcon paths in the JSX)

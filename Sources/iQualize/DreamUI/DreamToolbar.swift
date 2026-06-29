@@ -98,35 +98,17 @@ struct DreamToolbar: View {
             get: { vm.snapToSemitone },
             set: { vm.snapToSemitone = $0; vm.persistSnap() }
         )) {
-            HStack(spacing: 4) {
-                Image(systemName: "music.note").font(.system(size: 11))
-                Text("Snap")
-            }
+            MagnetIcon(size: 15)
         }
         .toggleStyle(.button)
         .controlSize(.regular)
-
-        Menu {
-            Picker("Theme", selection: Binding(
-                get: { vm.theme },
-                set: { vm.theme = $0; vm.persistTheme() }
-            )) {
-                Text("Auto").tag(DreamThemePreference.auto)
-                Text("Light").tag(DreamThemePreference.light)
-                Text("Dark").tag(DreamThemePreference.dark)
-            }
-        } label: {
-            Image(systemName: vm.theme.systemImage).font(.system(size: 12, weight: .medium))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .controlSize(.regular)
-        .fixedSize()
+        .help("Snap band frequencies to semitones")
 
         Button(action: { vm.onOpenSettings?() }) {
             Image(systemName: "gearshape").font(.system(size: 12, weight: .medium))
         }
         .controlSize(.regular)
+        .help("Settings")
     }
 
     private var presetButtonLabel: String {

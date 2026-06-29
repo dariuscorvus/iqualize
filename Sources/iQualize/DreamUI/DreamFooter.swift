@@ -7,32 +7,45 @@ struct DreamFooter: View {
     @Environment(\.dreamTheme) private var theme
 
     var body: some View {
-        VStack(spacing: 4) {
-            // Row 1: Bypass · In · Out · Balance · Channel
-            HStack(spacing: 12) {
+        VStack(spacing: 6) {
+            // Row 1 — levels & routing.
+            HStack(spacing: 10) {
                 bypassToggle
+                divider
                 gainSlider(label: "In", value: $vm.inGainDB, onChange: vm.applyInputGain)
                 gainSlider(label: "Out", value: $vm.outGainDB, onChange: vm.applyOutputGain)
                 balanceSlider
+                divider
                 channelSegment
-                Spacer()
+                Spacer(minLength: 8)
                 outputLabel
             }
 
-            // Row 2: Pre-EQ · Post-EQ · Q/Oct · Peak Limiter · Auto-scale · Max gain
-            HStack(spacing: 12) {
+            // Row 2 — spectrum, scale, and processing.
+            HStack(spacing: 10) {
                 preEqToggle
                 postEqToggle
-                bandwidthDisplaySegment
-                peakLimiterToggle
+                divider
                 autoScaleToggle
+                bandwidthDisplaySegment
                 maxGainSegment
+                divider
+                peakLimiterToggle
                 Spacer()
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(theme.bgToolbar)
+    }
+
+    /// Thin vertical separator between footer groups, matching the toolbar's
+    /// `DreamToolbarGroup` divider language.
+    @ViewBuilder
+    private var divider: some View {
+        theme.line
+            .frame(width: 1, height: 16)
+            .padding(.horizontal, 2)
     }
 
     // MARK: - Toggles
@@ -85,7 +98,9 @@ struct DreamFooter: View {
             Text("\(label):")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.textMute)
-                .frame(minWidth: 22, alignment: .trailing)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 28, alignment: .trailing)
             DreamSlider(
                 value: Binding(
                     get: { Double(value.wrappedValue) },
@@ -97,7 +112,9 @@ struct DreamFooter: View {
             Text(formatSigned(value.wrappedValue))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(theme.textDim)
-                .frame(minWidth: 50, alignment: .leading)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 52, alignment: .leading)
         }
     }
 
@@ -107,7 +124,9 @@ struct DreamFooter: View {
             Text("Bal:")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.textMute)
-                .frame(minWidth: 22, alignment: .trailing)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 28, alignment: .trailing)
             DreamSlider(
                 value: Binding(
                     get: { Double(vm.balance) },
@@ -120,7 +139,9 @@ struct DreamFooter: View {
             Text(formatBalance(vm.balance))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(theme.textDim)
-                .frame(minWidth: 30, alignment: .leading)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 34, alignment: .leading)
         }
     }
 
@@ -168,8 +189,11 @@ struct DreamFooter: View {
         HStack(spacing: 4) {
             Text("Output:")
                 .foregroundStyle(theme.textMute)
+                .fixedSize()
             Text(vm.outputDeviceName)
                 .foregroundStyle(theme.textDim)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .font(.system(size: 12))
     }

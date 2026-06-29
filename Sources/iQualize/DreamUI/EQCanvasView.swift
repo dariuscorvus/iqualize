@@ -45,7 +45,7 @@ struct EQCanvasView: View {
     private func addButton(_ side: AddSide) -> some View {
         AddBandButton(side: side) { vm.addBand(side == .left ? .left : .right) }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: side == .left ? .leading : .trailing)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 8)
     }
 
     // MARK: - Pointer overlay

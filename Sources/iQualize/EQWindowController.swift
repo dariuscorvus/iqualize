@@ -113,6 +113,10 @@ final class EQWindowController: NSWindowController {
         viewModel.bandwidthDisplay = asQ ? .q : .oct
     }
 
+    func syncTheme(_ preference: DreamThemePreference) {
+        viewModel.theme = preference
+    }
+
     // The color/fill settings are wired through Settings → UserDefaults; the canvas re-reads
     // them on the next draw. Setters left as no-ops to preserve the public surface.
     func syncPreEqLineColor(_ color: NSColor) {}
