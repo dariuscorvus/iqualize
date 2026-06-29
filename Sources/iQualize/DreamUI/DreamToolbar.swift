@@ -98,7 +98,7 @@ struct DreamToolbar: View {
             get: { vm.snapToSemitone },
             set: { vm.snapToSemitone = $0; vm.persistSnap() }
         )) {
-            MagnetIcon(size: 14)
+            MagnetIcon(size: 15)
         }
         .toggleStyle(.button)
         .controlSize(.regular)

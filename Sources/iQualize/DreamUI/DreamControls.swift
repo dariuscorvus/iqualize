@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // MARK: - tb-btn (toolbar button)
@@ -203,36 +204,29 @@ struct DreamToolbarGroup<Content: View>: View {
     }
 }
 
-// MARK: - Magnet icon (SF Symbols has no `magnet` glyph on macOS 14–15, so draw a horseshoe)
+// MARK: - Magnet icon
 
+/// Tabler's `magnet` glyph (SF Symbols has no `magnet` on macOS), rendered straight from its SVG
+/// as a template image so it tints with the control's foreground/accent color — the Snap toggle
+/// shows it in the text color when off and white when on.
 struct MagnetIcon: View {
-    var size: CGFloat = 14
-    var lineWidth: CGFloat = 1.7
+    var size: CGFloat = 15
 
     var body: some View {
-        MagnetShape()
-            .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+        Image(nsImage: Self.image)
+            .renderingMode(.template)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
             .frame(width: size, height: size)
     }
-}
 
-private struct MagnetShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        // Reference geometry in a 24×24 box; horseshoe opening downward (tips at the bottom),
-        // matching the 🧲 orientation. Scaled to whatever frame we're given.
-        let s = min(rect.width, rect.height) / 24
-        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + x * s, y: rect.minY + y * s) }
-        var p = Path()
-        // Body: left prong up, arc over the top, right prong down.
-        p.move(to: pt(7, 20))
-        p.addLine(to: pt(7, 11))
-        p.addQuadCurve(to: pt(17, 11), control: pt(12, 2))
-        p.addLine(to: pt(17, 20))
-        // Pole caps at the two bottom tips.
-        p.move(to: pt(4.5, 20)); p.addLine(to: pt(9.5, 20))
-        p.move(to: pt(14.5, 20)); p.addLine(to: pt(19.5, 20))
-        return p
-    }
+    private static let image: NSImage = {
+        let svg = #"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 13V5a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v8a2 2 0 0 0 6 0V5a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v8a8 8 0 0 1-16 0m0-5h5m6 0h4"/></svg>"#
+        let img = NSImage(data: Data(svg.utf8)) ?? NSImage()
+        img.isTemplate = true
+        return img
+    }()
 }
 
 // MARK: - Filter type icon (mirrors FilterIcon paths in the JSX)
