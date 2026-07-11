@@ -196,10 +196,10 @@ struct EQCanvasView: View {
 
         // Real pre/post-EQ spectrum (only if engine is running and toggle is on)
         if vm.audioEngine.isRunning && vm.preEqEnabled {
-            drawRealSpectrum(into: &ctx, size: size, mags: scratch.preEqMags, color: theme.pre, fillColor: theme.pre.opacity(0.18), displayMax: displayMax)
+            drawRealSpectrum(into: &ctx, size: size, mags: scratch.preEqMags, color: vm.preEqLineColor, fillColor: vm.preEqFillEnabled ? vm.preEqFillColor.opacity(0.18) : nil, displayMax: displayMax)
         }
         if vm.audioEngine.isRunning && vm.postEqEnabled && !vm.bypass {
-            drawRealSpectrum(into: &ctx, size: size, mags: scratch.postEqMags, color: theme.post, fillColor: nil, displayMax: displayMax)
+            drawRealSpectrum(into: &ctx, size: size, mags: scratch.postEqMags, color: vm.postEqLineColor, fillColor: vm.postEqFillEnabled ? vm.postEqFillColor.opacity(0.18) : nil, displayMax: displayMax)
         }
 
         // Per-band ghost responses
@@ -310,20 +310,24 @@ struct EQCanvasView: View {
                 ctx.stroke(s, with: .color(Color(rgba: 0x141820, a: 0.85 * opacity)), lineWidth: 1.6)
             }
 
-            // dB / Hz labels
-            let dbText = formatDB(b.gain)
-            let hzText = formatHz(b.frequency)
-            let weightSel: Font.Weight = isSel ? .semibold : isHov ? .medium : .regular
-            let dbAlpha: Double = isSel ? (isLight ? 0.78 : 0.98) : isHov ? (isLight ? 0.62 : 0.86) : (isLight ? 0.42 : 0.62)
-            let hzAlpha: Double = isSel ? (isLight ? 0.55 : 0.70) : isHov ? (isLight ? 0.40 : 0.55) : (isLight ? 0.28 : 0.38)
-            let labelW: CGFloat = 60
-            let flip = x + knobR + 6 + labelW + 6 > W
-            let lx = flip ? x - knobR - 6 : x + knobR + 6
-            let dbView = Text(dbText).font(.system(size: isSel ? 12 : 11, weight: weightSel)).foregroundStyle(ink(dbAlpha))
-            let hzView = Text(hzText).font(.system(size: isSel ? 11 : 10, weight: isSel ? .medium : .regular)).foregroundStyle(ink(hzAlpha))
-            let anchor: UnitPoint = flip ? .trailing : .leading
-            ctx.draw(dbView, at: CGPoint(x: lx, y: y - 7), anchor: anchor)
-            ctx.draw(hzView, at: CGPoint(x: lx, y: y + 7), anchor: anchor)
+            // dB / Hz labels — only for the selected/hovered band; the readout grid below
+            // already surfaces this per-band, so showing it for every knob at once just
+            // clutters and overlaps when bands sit close together in frequency.
+            if isSel || isHov {
+                let dbText = formatDB(b.gain)
+                let hzText = formatHz(b.frequency)
+                let weightSel: Font.Weight = isSel ? .semibold : .medium
+                let dbAlpha: Double = isSel ? (isLight ? 0.78 : 0.98) : (isLight ? 0.62 : 0.86)
+                let hzAlpha: Double = isSel ? (isLight ? 0.55 : 0.70) : (isLight ? 0.40 : 0.55)
+                let labelW: CGFloat = 60
+                let flip = x + knobR + 6 + labelW + 6 > W
+                let lx = flip ? x - knobR - 6 : x + knobR + 6
+                let dbView = Text(dbText).font(.system(size: isSel ? 12 : 11, weight: weightSel)).foregroundStyle(ink(dbAlpha))
+                let hzView = Text(hzText).font(.system(size: isSel ? 11 : 10, weight: isSel ? .medium : .regular)).foregroundStyle(ink(hzAlpha))
+                let anchor: UnitPoint = flip ? .trailing : .leading
+                ctx.draw(dbView, at: CGPoint(x: lx, y: y - 7), anchor: anchor)
+                ctx.draw(hzView, at: CGPoint(x: lx, y: y + 7), anchor: anchor)
+            }
 
             // Bandwidth readout while dragging Q
             if isSel, let drag = dragState, drag.bandID == b.id, drag.mode == .bandwidth {

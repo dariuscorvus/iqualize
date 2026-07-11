@@ -59,6 +59,12 @@ final class DreamViewModel {
     var balance: Float = 0
     var autoScale: Bool = true
     var maxGainDB: Float = 12
+    var preEqLineColor: Color = Color(nsColor: .systemCyan)
+    var postEqLineColor: Color = Color(nsColor: .systemOrange)
+    var preEqFillColor: Color = Color(nsColor: .systemCyan)
+    var postEqFillColor: Color = Color(nsColor: .systemOrange)
+    var preEqFillEnabled: Bool = false
+    var postEqFillEnabled: Bool = true
 
     var outputDeviceName: String { audioEngine.outputDeviceName }
 
@@ -99,6 +105,12 @@ final class DreamViewModel {
         inGainDB = s.inputGainDB
         outGainDB = s.outputGainDB
         maxGainDB = s.maxGainDB
+        preEqLineColor = s.preEqLineColorHex.flatMap(NSColor.init(srgbHexRGB:)).map(Color.init(nsColor:)) ?? Color(nsColor: .systemCyan)
+        postEqLineColor = s.postEqLineColorHex.flatMap(NSColor.init(srgbHexRGB:)).map(Color.init(nsColor:)) ?? Color(nsColor: .systemOrange)
+        preEqFillColor = s.preEqFillColorHex.flatMap(NSColor.init(srgbHexRGB:)).map(Color.init(nsColor:)) ?? Color(nsColor: .systemCyan)
+        postEqFillColor = s.postEqFillColorHex.flatMap(NSColor.init(srgbHexRGB:)).map(Color.init(nsColor:)) ?? Color(nsColor: .systemOrange)
+        preEqFillEnabled = s.preEqFillEnabled
+        postEqFillEnabled = s.postEqFillEnabled
         if s.splitChannelEnabled, let chRaw = s.activeChannel {
             channel = chRaw == "right" ? .r : .l
         } else {
