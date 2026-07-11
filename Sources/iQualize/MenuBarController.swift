@@ -76,6 +76,21 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        // Favorites — pinned presets for one-click switching
+        let favorites = presetStore.favoritePresets
+        if !favorites.isEmpty {
+            for preset in favorites {
+                let item = NSMenuItem(title: preset.name,
+                                      action: #selector(selectPreset(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = preset.id.uuidString
+                item.state = audioEngine.activePreset.id == preset.id ? .on : .off
+                item.image = Self.starImage
+                menu.addItem(item)
+            }
+            menu.addItem(.separator())
+        }
+
         // Presets submenu
         let presetMenuItem = NSMenuItem(title: "Presets (\(audioEngine.activePreset.name))",
                                          action: nil, keyEquivalent: "")
@@ -85,13 +100,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
         builtInHeader.isEnabled = false
         presetSubmenu.addItem(builtInHeader)
         for preset in EQPresetData.builtInPresets {
-            let item = NSMenuItem(title: preset.name,
-                                  action: #selector(selectPreset(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = preset.id.uuidString
-            item.state = audioEngine.activePreset.id == preset.id ? .on : .off
-            item.indentationLevel = 1
-            presetSubmenu.addItem(item)
+            presetSubmenu.addItem(presetItem(for: preset))
         }
 
         if !presetStore.customPresets.isEmpty {
@@ -100,15 +109,14 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
             customHeader.isEnabled = false
             presetSubmenu.addItem(customHeader)
             for preset in presetStore.customPresets {
-                let item = NSMenuItem(title: preset.name,
-                                      action: #selector(selectPreset(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = preset.id.uuidString
-                item.state = audioEngine.activePreset.id == preset.id ? .on : .off
-                item.indentationLevel = 1
-                presetSubmenu.addItem(item)
+                presetSubmenu.addItem(presetItem(for: preset))
             }
         }
+
+        presetSubmenu.addItem(.separator())
+        let pinHint = NSMenuItem(title: "⌥-click a preset to pin/unpin", action: nil, keyEquivalent: "")
+        pinHint.isEnabled = false
+        presetSubmenu.addItem(pinHint)
 
         presetMenuItem.submenu = presetSubmenu
         menu.addItem(presetMenuItem)
@@ -159,12 +167,39 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
         menu.addItem(quitItem)
     }
 
+    // MARK: - Presets
+
+    private static let starImage: NSImage = {
+        let image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: "Favorite")!
+        image.isTemplate = true
+        return image
+    }()
+
+    private func presetItem(for preset: EQPresetData) -> NSMenuItem {
+        let item = NSMenuItem(title: preset.name,
+                              action: #selector(selectPreset(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = preset.id.uuidString
+        item.state = audioEngine.activePreset.id == preset.id ? .on : .off
+        item.indentationLevel = 1
+        if presetStore.isFavorite(preset.id) {
+            item.image = Self.starImage
+        }
+        return item
+    }
+
     // MARK: - Actions
 
     @objc private func selectPreset(_ sender: NSMenuItem) {
         guard let uuidString = sender.representedObject as? String,
-              let id = UUID(uuidString: uuidString),
-              let preset = presetStore.preset(for: id) else { return }
+              let id = UUID(uuidString: uuidString) else { return }
+
+        if NSEvent.modifierFlags.contains(.option) {
+            presetStore.toggleFavorite(id)
+            return
+        }
+
+        guard let preset = presetStore.preset(for: id) else { return }
         audioEngine.activePreset = preset
         var s = iQualizeState.load()
         s.selectedPresetID = preset.id
