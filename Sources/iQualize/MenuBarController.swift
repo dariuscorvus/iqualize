@@ -85,7 +85,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
                 item.target = self
                 item.representedObject = preset.id.uuidString
                 item.state = audioEngine.activePreset.id == preset.id ? .on : .off
-                item.image = Self.starImage
+                item.image = Self.pinImage
                 menu.addItem(item)
             }
             menu.addItem(.separator())
@@ -169,8 +169,8 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
 
     // MARK: - Presets
 
-    private static let starImage: NSImage = {
-        let image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: "Favorite")!
+    private static let pinImage: NSImage = {
+        let image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Pinned")!
         image.isTemplate = true
         return image
     }()
@@ -183,7 +183,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
         item.state = audioEngine.activePreset.id == preset.id ? .on : .off
         item.indentationLevel = 1
         if presetStore.isFavorite(preset.id) {
-            item.image = Self.starImage
+            item.image = Self.pinImage
         }
         return item
     }

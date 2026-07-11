@@ -129,12 +129,12 @@ struct DreamToolbar: View {
                 vm.loadPreset(id: preset.id)
             }
         }) {
-            let isFavorite = vm.presetStore.isFavorite(preset.id)
-            let name = isFavorite ? "★ \(preset.name)" : preset.name
             if preset.id == vm.activePresetID {
-                Label(name, systemImage: "checkmark")
+                Label(preset.name, systemImage: "checkmark")
+            } else if vm.presetStore.isFavorite(preset.id) {
+                Label(preset.name, systemImage: "pin.fill")
             } else {
-                Text(name)
+                Text(preset.name)
             }
         }
     }
