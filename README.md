@@ -61,6 +61,7 @@ open /Applications/iQualize.app
 - Adjustable max gain range: ±6, ±12, ±18, or ±24 dB — or auto-scale to fit the current curve (up to ±24 dB)
 - Input gain (±24 dB) — pre-EQ level control for proper gain staging
 - Output gain (±24 dB) — post-EQ level control, applied before the peak limiter
+- In/Out dB can be shared globally across all presets, or set per-preset — toggle in Settings → General (see Presets and Settings below)
 - Dynamic peak limiter (AUPeakLimiter) — prevents digital clipping at 0 dBFS
 - Smooth, glitch-free parameter updates — only changed values are written to the audio unit
 
@@ -76,6 +77,7 @@ open /Applications/iQualize.app
 - Built-in presets: Flat, Bass Boost, Vocal Clarity, Loudness, Treble Boost, Podcast, Techno, Deep House, Hard Techno, Minimal, American Rap, German Rap
 - Create, rename, overwrite, and delete custom presets
 - Built-in presets auto-fork when edited (non-destructive)
+- In/Out dB gain can be stored per-preset (default) or shared globally across all presets — see Settings → General
 - Unsaved changes indicator (asterisk in title)
 - Import/export as `.iqpreset` JSON files with batch import and overwrite protection
 - Quick switching from the menu bar or EQ window picker
@@ -97,6 +99,8 @@ Presets are `.iqpreset` files — plain JSON:
 ```
 
 Each band: `frequency` (Hz, 20–20000), `gain` (dB), `bandwidth` (octaves, 0.05–10 — 1.0 = one octave ≈ Q 1.41), `filterType` (one of `parametric`, `lowShelf`, `highShelf`, `lowPass`, `highPass`, `bandPass`, `notch` — defaults to `parametric` if omitted).
+
+Presets may also carry `inputGainDB` and `outputGainDB` (dB, optional — omitted or absent means 0 dB, and they're only applied when In/Out dB is in per-preset mode; see Settings → General).
 
 ### Undo/Redo
 
@@ -132,7 +136,7 @@ Accessible via the gear icon in the EQ window, the Settings item in the menu bar
 
 - **Audio**: Peak Limiter toggle, Max Gain range (±6/12/18/24 dB), Auto Scale toggle
 - **Display**: Pre-EQ / Post-EQ spectrum toggles, per-spectrum line color picker, per-spectrum Fill toggle with its own color picker, reset buttons to return to the dynamic system colors, Q / Octave bandwidth display toggle
-- **General**: Theme (Auto / Light / Dark), Hide from Dock toggle, Start at Login toggle
+- **General**: Theme (Auto / Light / Dark), Hide from Dock toggle, Start at Login toggle, Share In/Out dB across all presets toggle
 
 ### Spectrum Analyzer
 

@@ -97,6 +97,11 @@ struct EQPresetData: Codable, Equatable, Sendable, Identifiable {
     /// When non-nil, `bands` represents the left channel and `rightBands` the right.
     var rightBands: [EQBand]?
     let isBuiltIn: Bool
+    /// Per-preset input gain override, in dB. Nil = 0 dB / not customized.
+    /// Only applied when In/Out dB is in per-preset mode (see AudioEngine.gainIsGlobal).
+    var inputGainDB: Float?
+    /// Per-preset output gain override, in dB. Nil = 0 dB / not customized.
+    var outputGainDB: Float?
 
     var isFlat: Bool {
         let bandsFlat = bands.allSatisfy { $0.gain == 0 && $0.filterType == .parametric }

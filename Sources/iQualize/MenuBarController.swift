@@ -28,6 +28,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
         }
 
         // Restore saved state and always start EQ
+        audioEngine.gainIsGlobal = state.linkGainGlobally
         if let preset = presetStore.preset(for: state.selectedPresetID) {
             audioEngine.activePreset = preset
         }
@@ -35,8 +36,10 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
         audioEngine.maxGainDB = state.maxGainDB
         audioEngine.bypassed = state.bypassed
         audioEngine.balance = state.balance
-        audioEngine.inputGainDB = state.inputGainDB
-        audioEngine.outputGainDB = state.outputGainDB
+        if state.linkGainGlobally {
+            audioEngine.inputGainDB = state.inputGainDB
+            audioEngine.outputGainDB = state.outputGainDB
+        }
         audioEngine.setEnabled(true)
         updateIcon()
 
@@ -214,7 +217,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
     @objc private func openSettings(_ sender: NSMenuItem) {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                audioEngine: audioEngine, eqWindowController: eqWindowController)
+                audioEngine: audioEngine, presetStore: presetStore, eqWindowController: eqWindowController)
         }
         settingsWindowController?.updateEQWindowController(eqWindowController)
         settingsWindowController?.showWindow(nil)
@@ -265,7 +268,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
     func showSettings() {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                audioEngine: audioEngine, eqWindowController: eqWindowController)
+                audioEngine: audioEngine, presetStore: presetStore, eqWindowController: eqWindowController)
         }
         settingsWindowController?.updateEQWindowController(eqWindowController)
         settingsWindowController?.showWindow(nil)

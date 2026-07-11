@@ -60,6 +60,30 @@ final class PresetStore {
         }
     }
 
+    /// Returns a "(Custom)" fork of `preset` (deduped name against `allPresets`) if it's
+    /// built-in; returns `preset` unchanged otherwise. Pure — does not persist and does not
+    /// touch AudioEngine; callers decide whether/when to call `saveCustomPreset`.
+    func forkIfBuiltIn(_ preset: EQPresetData) -> EQPresetData {
+        guard preset.isBuiltIn else { return preset }
+        let baseName = "\(preset.name) (Custom)"
+        let existing = allPresets.map { $0.name }
+        var forkName = baseName
+        if existing.contains(forkName) {
+            var n = 2
+            while existing.contains("\(baseName) \(n)") { n += 1 }
+            forkName = "\(baseName) \(n)"
+        }
+        return EQPresetData(
+            id: UUID(),
+            name: forkName,
+            bands: preset.bands,
+            rightBands: preset.rightBands,
+            isBuiltIn: false,
+            inputGainDB: preset.inputGainDB,
+            outputGainDB: preset.outputGainDB
+        )
+    }
+
     private func load() {
         if let data = UserDefaults.standard.data(forKey: Self.key),
            let presets = try? JSONDecoder().decode([EQPresetData].self, from: data) {

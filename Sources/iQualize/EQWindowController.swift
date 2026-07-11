@@ -93,6 +93,10 @@ final class EQWindowController: NSWindowController {
         viewModel.peakLimiter = on
     }
 
+    func syncGainIsGlobal(_ on: Bool) {
+        viewModel.gainIsGlobal = on
+    }
+
     func syncMaxGain(_ db: Float) {
         viewModel.maxGainDB = db
     }
