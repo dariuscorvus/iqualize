@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.32.2] - 2026-07-11
+
+### Fixed
+- iQualize no longer requests the combined Screen & System Audio Recording permission on launch. `AudioHardwareCreateProcessTap` already triggers its own narrower TCC prompt scoped to system audio only (`NSAudioCaptureUsageDescription`), so the eager `CGRequestScreenCaptureAccess` call was asking for more access than the app actually needs (#83)
+
 ## [0.32.1] - 2026-07-11
 
 ### Fixed
