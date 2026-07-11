@@ -110,8 +110,16 @@ final class AudioEngine {
     var activePreset: EQPresetData = .flat {
         didSet {
             applyBands(from: oldValue)
+            if !gainIsGlobal {
+                inputGainDB = activePreset.inputGainDB ?? 0
+                outputGainDB = activePreset.outputGainDB ?? 0
+            }
         }
     }
+
+    /// When true, `inputGainDB`/`outputGainDB` are shared across all presets and untouched
+    /// by preset switches. When false, they're resolved from `activePreset` on every switch.
+    var gainIsGlobal: Bool = true
 
     var peakLimiter: Bool = true {
         didSet { applyBands() }

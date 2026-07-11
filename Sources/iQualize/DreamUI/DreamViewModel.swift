@@ -56,6 +56,7 @@ final class DreamViewModel {
     var postEqEnabled: Bool = false
     var inGainDB: Float = 0
     var outGainDB: Float = 0
+    var gainIsGlobal: Bool = true
     var balance: Float = 0
     var autoScale: Bool = true
     var maxGainDB: Float = 12
@@ -104,6 +105,7 @@ final class DreamViewModel {
         balance = s.balance
         inGainDB = s.inputGainDB
         outGainDB = s.outputGainDB
+        gainIsGlobal = s.linkGainGlobally
         maxGainDB = s.maxGainDB
         preEqLineColor = s.preEqLineColorHex.flatMap(NSColor.init(srgbHexRGB:)).map(Color.init(nsColor:)) ?? Color(nsColor: .systemCyan)
         postEqLineColor = s.postEqLineColorHex.flatMap(NSColor.init(srgbHexRGB:)).map(Color.init(nsColor:)) ?? Color(nsColor: .systemOrange)
@@ -155,6 +157,8 @@ final class DreamViewModel {
         presetName = preset.name
         activePresetID = preset.id
         isBuiltIn = preset.isBuiltIn
+        inGainDB = audioEngine.inputGainDB
+        outGainDB = audioEngine.outputGainDB
         if initial {
             savedSnapshot = preset
             isModified = false
@@ -344,22 +348,7 @@ final class DreamViewModel {
 
     private func forkIfBuiltIn() {
         guard audioEngine.activePreset.isBuiltIn else { return }
-        let baseName = "\(audioEngine.activePreset.name) (Custom)"
-        let existing = presetStore.allPresets.map { $0.name }
-        var forkName = baseName
-        if existing.contains(forkName) {
-            var n = 2
-            while existing.contains("\(baseName) \(n)") { n += 1 }
-            forkName = "\(baseName) \(n)"
-        }
-        let custom = audioEngine.activePreset
-        let newPreset = EQPresetData(
-            id: UUID(),
-            name: forkName,
-            bands: custom.bands,
-            rightBands: custom.rightBands,
-            isBuiltIn: false
-        )
+        let newPreset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
         audioEngine.activePreset = newPreset
         savedSnapshot = newPreset
         presetName = newPreset.name
@@ -784,13 +773,31 @@ final class DreamViewModel {
     }
 
     func applyInputGain() {
-        audioEngine.inputGainDB = inGainDB
-        persistFooterToggles()
+        if audioEngine.gainIsGlobal {
+            audioEngine.inputGainDB = inGainDB
+            persistFooterToggles()
+        } else {
+            forkIfBuiltIn()
+            var preset = audioEngine.activePreset
+            preset.inputGainDB = inGainDB
+            audioEngine.activePreset = preset
+            presetStore.saveCustomPreset(preset)
+            savedSnapshot = preset
+        }
     }
 
     func applyOutputGain() {
-        audioEngine.outputGainDB = outGainDB
-        persistFooterToggles()
+        if audioEngine.gainIsGlobal {
+            audioEngine.outputGainDB = outGainDB
+            persistFooterToggles()
+        } else {
+            forkIfBuiltIn()
+            var preset = audioEngine.activePreset
+            preset.outputGainDB = outGainDB
+            audioEngine.activePreset = preset
+            presetStore.saveCustomPreset(preset)
+            savedSnapshot = preset
+        }
     }
 
     func applyBalance() {
