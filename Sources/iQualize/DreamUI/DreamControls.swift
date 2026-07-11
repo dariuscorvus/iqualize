@@ -122,24 +122,26 @@ struct DreamCheckbox: View {
 struct DreamSegment<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [(value: Value, label: String)]
-    var disabled: Bool = false
+    /// Visually dims the control (e.g. to show it's currently overridden) without blocking taps —
+    /// tapping an option should still act like a toggle that takes back control.
+    var dimmed: Bool = false
 
     @Environment(\.dreamTheme) private var theme
 
     var body: some View {
         HStack(spacing: 0) {
             ForEach(Array(options.enumerated()), id: \.offset) { _, opt in
-                Button(action: { if !disabled { selection = opt.value } }) {
+                Button(action: { selection = opt.value }) {
                     Text(opt.label)
                         .font(.system(size: 10.5))
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 1.5)
-                        .foregroundStyle(selection == opt.value && !disabled ? .white : theme.textDim)
+                        .foregroundStyle(selection == opt.value && !dimmed ? .white : theme.textDim)
                         .background(
                             RoundedRectangle(cornerRadius: 3)
-                                .fill(selection == opt.value && !disabled ? theme.accent : Color.clear)
+                                .fill(selection == opt.value && !dimmed ? theme.accent : Color.clear)
                         )
                         .contentShape(Rectangle())
                 }
@@ -155,7 +157,7 @@ struct DreamSegment<Value: Hashable>: View {
             RoundedRectangle(cornerRadius: 4)
                 .strokeBorder(theme.line, lineWidth: 1)
         )
-        .opacity(disabled ? 0.4 : 1.0)
+        .opacity(dimmed ? 0.5 : 1.0)
     }
 }
 

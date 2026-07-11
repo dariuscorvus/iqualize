@@ -179,13 +179,13 @@ struct DreamFooter: View {
         DreamSegment(
             selection: Binding(
                 get: { Int(vm.maxGainDB) },
-                set: { vm.maxGainDB = Float($0); vm.applyMaxGain() }
+                set: { vm.maxGainDB = Float($0); vm.autoScale = false; vm.applyMaxGain() }
             ),
             options: [(12, "±12"), (18, "±18"), (24, "±24")],
-            disabled: vm.autoScale
+            dimmed: vm.autoScale
         )
         .help(vm.autoScale
-            ? "Auto-scale is on, so the graph's axis grows to fit the curve and can exceed this range. Turn off Auto-scale to use a fixed range."
+            ? "Auto-scale is on, so the graph's axis grows to fit the curve. Click a range to switch to that fixed range."
             : "Graph axis range")
     }
 

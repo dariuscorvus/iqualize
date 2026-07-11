@@ -362,6 +362,12 @@ struct EQCanvasView: View {
             let mapped = (db + 90.0) / 90.0 * (displayMax * 2) - displayMax
             pts.append(CGPoint(x: x, y: gainToY(mapped, H: H, maxDB: displayMax)))
         }
+        // Extend flat into the edge margins (matching how the composite curve behaves there)
+        // instead of stopping short of the canvas edge at the 20 Hz / 20 kHz bins.
+        if let first = pts.first, let last = pts.last {
+            pts.insert(CGPoint(x: 0, y: first.y), at: 0)
+            pts.append(CGPoint(x: W, y: last.y))
+        }
 
         if let fc = fillColor {
             var p = smoothPath(pts: pts)
@@ -588,13 +594,20 @@ struct EQCanvasView: View {
 
     // MARK: - Math (mirrors iqualize-engine.js)
 
+    /// Horizontal margin reserved at 20 Hz and 20 kHz so a band knob sitting at either extreme
+    /// has room to render without being clipped by the canvas edge.
+    private static let chartLeftPad: CGFloat = 14
+    private static let chartRightPad: CGFloat = 14
+
     private func freqToX(_ f: Double, W: CGFloat) -> CGFloat {
+        let chartW = max(1, W - Self.chartLeftPad - Self.chartRightPad)
         let t = (log10(max(20.0, f)) - log10(20.0)) / (log10(20000.0) - log10(20.0))
-        return W * t
+        return Self.chartLeftPad + chartW * CGFloat(t)
     }
 
     private func xToFreq(_ x: CGFloat, W: CGFloat) -> Double {
-        let t = max(0, min(1, x / W))
+        let chartW = max(1, W - Self.chartLeftPad - Self.chartRightPad)
+        let t = max(0, min(1, (x - Self.chartLeftPad) / chartW))
         return pow(10.0, log10(20.0) + Double(t) * (log10(20000.0) - log10(20.0)))
     }
 
