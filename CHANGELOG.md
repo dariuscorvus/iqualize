@@ -2,6 +2,18 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.32.1] - 2026-07-11
+
+### Fixed
+- Pre/Post-EQ spectrum line and fill colors now respect the custom colors set in Settings → Display, instead of the Dream UI canvas silently ignoring them and drawing hardcoded colors with the fill defaults inverted (#81)
+- "Output:" device name no longer stretches the window on long names — it truncates and sits in its own centered row below the footer controls
+- Band dB/Hz readouts on the graph now only show for the selected/hovered band, instead of showing on every knob at once and overlapping when bands sit close in frequency
+- ±12/±18/±24 range control now acts as a toggle: clicking a value turns off Auto-scale and applies that range immediately, instead of silently being overridden while still looking selectable — this was the real bug behind the "±12 selected but axis shows ±24" report in #81
+- Band knobs at the 20 Hz/20 kHz frequency extremes no longer get clipped by the canvas edge; the pre/post-EQ spectrum trace now reaches the canvas edges to match
+
+### Changed
+- Footer reorganized: Bypass moved to the start of row 2, Q/Oct moved to the end of row 2 (after Peak Limiter), Auto-scale moved right after the ±12/±18/±24 control
+
 ## [0.32.0] - 2026-06-29
 
 ### Fixed
