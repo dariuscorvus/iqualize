@@ -5,6 +5,7 @@ import ServiceManagement
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let audioEngine: AudioEngine
+    private let presetStore: PresetStore
     private weak var eqWindowController: EQWindowController?
 
     private var peakLimiterCheckbox: NSButton!
@@ -26,9 +27,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var themeSegment: NSSegmentedControl!
     private var hideFromDockCheckbox: NSButton!
     private var startAtLoginCheckbox: NSButton!
+    private var linkGainCheckbox: NSButton!
 
-    init(audioEngine: AudioEngine, eqWindowController: EQWindowController?) {
+    init(audioEngine: AudioEngine, presetStore: PresetStore, eqWindowController: EQWindowController?) {
         self.audioEngine = audioEngine
+        self.presetStore = presetStore
         self.eqWindowController = eqWindowController
 
         let window = HelpAwareWindow(
@@ -73,6 +76,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         applyPostEqEnabled(!audioEngine.bypassed)
         bandwidthModeSegment.selectedSegment = state.showBandwidthAsQ ? 0 : 1
         themeSegment.selectedSegment = Self.themeIndex(for: state.dreamTheme)
+        linkGainCheckbox.state = state.linkGainGlobally ? .on : .off
     }
 
     func syncBypass(_ on: Bool) {
@@ -223,6 +227,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         startAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
         mainStack.addArrangedSubview(startAtLoginCheckbox)
 
+        linkGainCheckbox = NSButton(checkboxWithTitle: "Share In/Out dB across all presets",
+                                      target: self, action: #selector(toggleLinkGainGlobally(_:)))
+        linkGainCheckbox.state = state.linkGainGlobally ? .on : .off
+        mainStack.addArrangedSubview(linkGainCheckbox)
+
         return mainStack
     }
 
@@ -293,6 +302,32 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         state.peakLimiter = audioEngine.peakLimiter
         state.save()
         eqWindowController?.syncPeakLimiter(audioEngine.peakLimiter)
+    }
+
+    @objc private func toggleLinkGainGlobally(_ sender: NSButton) {
+        let makeGlobal = sender.state == .on
+        var state = iQualizeState.load()
+        if makeGlobal {
+            // Per-preset -> Global: current per-preset gain becomes the new shared baseline.
+            state.inputGainDB = audioEngine.inputGainDB
+            state.outputGainDB = audioEngine.outputGainDB
+            state.linkGainGlobally = true
+            state.save()
+            audioEngine.gainIsGlobal = true
+        } else {
+            // Global -> Per-preset: seed the active preset with the current global gain,
+            // forking it out of a built-in first if needed.
+            audioEngine.gainIsGlobal = false
+            var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+            preset.inputGainDB = audioEngine.inputGainDB
+            preset.outputGainDB = audioEngine.outputGainDB
+            presetStore.saveCustomPreset(preset)
+            audioEngine.activePreset = preset
+            state.linkGainGlobally = false
+            state.save()
+        }
+        eqWindowController?.syncGainIsGlobal(audioEngine.gainIsGlobal)
+        eqWindowController?.syncUIToPreset()
     }
 
     @objc private func maxGainChanged(_ sender: NSPopUpButton) {

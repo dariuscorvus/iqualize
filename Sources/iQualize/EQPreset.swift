@@ -19,6 +19,9 @@ struct iQualizeState: Codable {
     var activeChannel: String?
     var inputGainDB: Float
     var outputGainDB: Float
+    /// When true, `inputGainDB`/`outputGainDB` above are shared across all presets.
+    /// When false, gain is read from/written to the active EQPresetData instead.
+    var linkGainGlobally: Bool
     var showBandwidthAsQ: Bool
     /// User-picked Pre-EQ line color as `#RRGGBB` (sRGB). nil = use the dynamic system color.
     var preEqLineColorHex: String?
@@ -52,6 +55,7 @@ struct iQualizeState: Codable {
         activeChannel: nil,
         inputGainDB: 0.0,
         outputGainDB: 0.0,
+        linkGainGlobally: true,
         showBandwidthAsQ: true,
         preEqFillEnabled: false,
         postEqFillEnabled: true,
@@ -61,7 +65,7 @@ struct iQualizeState: Codable {
 
     private static let key = "com.iqualize.state"
 
-    init(isEnabled: Bool, selectedPresetID: UUID, peakLimiter: Bool, windowOpen: Bool = false, maxGainDB: Float = 12, bypassed: Bool = false, autoScale: Bool = true, preEqSpectrumEnabled: Bool = false, postEqSpectrumEnabled: Bool = false, hideFromDock: Bool = false, startAtLogin: Bool = false, balance: Float = 0.0, splitChannelEnabled: Bool = false, activeChannel: String? = nil, inputGainDB: Float = 0.0, outputGainDB: Float = 0.0, showBandwidthAsQ: Bool = true, preEqLineColorHex: String? = nil, postEqLineColorHex: String? = nil, preEqFillColorHex: String? = nil, postEqFillColorHex: String? = nil, preEqFillEnabled: Bool = false, postEqFillEnabled: Bool = true, dreamTheme: String? = nil, snapToSemitone: Bool = false) {
+    init(isEnabled: Bool, selectedPresetID: UUID, peakLimiter: Bool, windowOpen: Bool = false, maxGainDB: Float = 12, bypassed: Bool = false, autoScale: Bool = true, preEqSpectrumEnabled: Bool = false, postEqSpectrumEnabled: Bool = false, hideFromDock: Bool = false, startAtLogin: Bool = false, balance: Float = 0.0, splitChannelEnabled: Bool = false, activeChannel: String? = nil, inputGainDB: Float = 0.0, outputGainDB: Float = 0.0, linkGainGlobally: Bool = true, showBandwidthAsQ: Bool = true, preEqLineColorHex: String? = nil, postEqLineColorHex: String? = nil, preEqFillColorHex: String? = nil, postEqFillColorHex: String? = nil, preEqFillEnabled: Bool = false, postEqFillEnabled: Bool = true, dreamTheme: String? = nil, snapToSemitone: Bool = false) {
         self.isEnabled = isEnabled
         self.selectedPresetID = selectedPresetID
         self.peakLimiter = peakLimiter
@@ -78,6 +82,7 @@ struct iQualizeState: Codable {
         self.activeChannel = activeChannel
         self.inputGainDB = inputGainDB
         self.outputGainDB = outputGainDB
+        self.linkGainGlobally = linkGainGlobally
         self.showBandwidthAsQ = showBandwidthAsQ
         self.preEqLineColorHex = preEqLineColorHex
         self.postEqLineColorHex = postEqLineColorHex
@@ -107,6 +112,7 @@ struct iQualizeState: Codable {
         activeChannel = try? container.decode(String.self, forKey: .activeChannel)
         inputGainDB = (try? container.decode(Float.self, forKey: .inputGainDB)) ?? 0.0
         outputGainDB = (try? container.decode(Float.self, forKey: .outputGainDB)) ?? 0.0
+        linkGainGlobally = (try? container.decode(Bool.self, forKey: .linkGainGlobally)) ?? true
         showBandwidthAsQ = (try? container.decode(Bool.self, forKey: .showBandwidthAsQ)) ?? true
         preEqLineColorHex = try? container.decode(String.self, forKey: .preEqLineColorHex)
         postEqLineColorHex = try? container.decode(String.self, forKey: .postEqLineColorHex)
