@@ -2,12 +2,18 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.34.0] - 2026-07-11
+
+### Added
+- Pin/favorite presets so they show at the top of both the menu bar dropdown and the in-app preset picker for one-click switching, instead of always having to dig into the full preset list (#80). ⌥-click any preset to pin/unpin it; a pin marks favorited presets in the full list
+
 ## [0.33.0] - 2026-07-11
 
 ### Added
 - Per-preset In/Out dB — input and output gain can now be stored on each preset individually, so switching presets restores that preset's gain
 - New "Share In/Out dB across all presets" toggle in Settings → General to keep the previous behavior of one shared gain value across all presets (on by default, preserving existing behavior)
 - Adjusting In/Out dB on a built-in preset while per-preset mode is on forks it into a "(Custom)" copy, matching how band edits already fork built-ins
+
 ## [0.32.2] - 2026-07-11
 
 ### Fixed
