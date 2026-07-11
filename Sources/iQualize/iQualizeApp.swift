@@ -1,5 +1,4 @@
 import AppKit
-import CoreGraphics
 import Foundation
 import ServiceManagement
 
@@ -13,12 +12,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     var isRealQuit = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Check screen/audio capture permission — CATap requires it
-        let hasAccess = CGPreflightScreenCaptureAccess()
-        if !hasAccess {
-            CGRequestScreenCaptureAccess()
-        }
-
+        // No explicit permission preflight here — AudioHardwareCreateProcessTap
+        // (in AudioEngine.start()) triggers its own audio-only TCC prompt via
+        // NSAudioCaptureUsageDescription, scoped to system audio capture rather
+        // than the combined Screen & System Audio Recording permission.
         setupMainMenu()
 
         audioEngine = AudioEngine()

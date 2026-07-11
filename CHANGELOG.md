@@ -8,6 +8,10 @@ All notable changes to iQualize will be documented in this file.
 - Per-preset In/Out dB — input and output gain can now be stored on each preset individually, so switching presets restores that preset's gain
 - New "Share In/Out dB across all presets" toggle in Settings → General to keep the previous behavior of one shared gain value across all presets (on by default, preserving existing behavior)
 - Adjusting In/Out dB on a built-in preset while per-preset mode is on forks it into a "(Custom)" copy, matching how band edits already fork built-ins
+## [0.32.2] - 2026-07-11
+
+### Fixed
+- iQualize no longer requests the combined Screen & System Audio Recording permission on launch. `AudioHardwareCreateProcessTap` already triggers its own narrower TCC prompt scoped to system audio only (`NSAudioCaptureUsageDescription`), so the eager `CGRequestScreenCaptureAccess` call was asking for more access than the app actually needs (#83)
 
 ## [0.32.1] - 2026-07-11
 
