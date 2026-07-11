@@ -5,7 +5,7 @@ All notable changes to iQualize will be documented in this file.
 ## [0.33.0] - 2026-07-11
 
 ### Added
-- Pin/favorite presets so they show at the top level of the menu bar dropdown for one-click switching, instead of always having to dig into the Presets submenu (#80). ⌥-click any preset (in the top-level Favorites list or the Presets submenu) to pin/unpin it; a star marks favorited presets in the submenu
+- Pin/favorite presets so they show at the top of both the menu bar dropdown and the in-app preset picker for one-click switching, instead of always having to dig into the full preset list (#80). ⌥-click any preset to pin/unpin it; a star marks favorited presets in the full list
 
 ## [0.32.2] - 2026-07-11
 

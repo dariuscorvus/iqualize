@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @available(macOS 14.2, *)
@@ -44,15 +45,18 @@ struct DreamToolbar: View {
     @ViewBuilder
     private var presetGroup: some View {
         Menu {
-            ForEach(vm.presetStore.allPresets, id: \.id) { preset in
-                Button(action: { vm.loadPreset(id: preset.id) }) {
-                    if preset.id == vm.activePresetID {
-                        Label(preset.name, systemImage: "checkmark")
-                    } else {
-                        Text(preset.name)
-                    }
+            let favorites = vm.presetStore.favoritePresets
+            if !favorites.isEmpty {
+                ForEach(favorites, id: \.id) { preset in
+                    presetButton(for: preset)
                 }
+                Divider()
             }
+            ForEach(vm.presetStore.allPresets, id: \.id) { preset in
+                presetButton(for: preset)
+            }
+            Divider()
+            Text("⌥-click a preset to pin/unpin")
         } label: {
             HStack(spacing: 4) {
                 Text(presetButtonLabel)
@@ -114,5 +118,24 @@ struct DreamToolbar: View {
     private var presetButtonLabel: String {
         let suffix = vm.isBuiltIn ? " (Built-in)" : ""
         return "\(vm.presetName)\(suffix)"
+    }
+
+    @ViewBuilder
+    private func presetButton(for preset: EQPresetData) -> some View {
+        Button(action: {
+            if NSEvent.modifierFlags.contains(.option) {
+                vm.presetStore.toggleFavorite(preset.id)
+            } else {
+                vm.loadPreset(id: preset.id)
+            }
+        }) {
+            let isFavorite = vm.presetStore.isFavorite(preset.id)
+            let name = isFavorite ? "★ \(preset.name)" : preset.name
+            if preset.id == vm.activePresetID {
+                Label(name, systemImage: "checkmark")
+            } else {
+                Text(name)
+            }
+        }
     }
 }
