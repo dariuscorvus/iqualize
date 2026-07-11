@@ -122,6 +122,9 @@ struct DreamCheckbox: View {
 struct DreamSegment<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [(value: Value, label: String)]
+    /// Visually dims the control (e.g. to show it's currently overridden) without blocking taps —
+    /// tapping an option should still act like a toggle that takes back control.
+    var dimmed: Bool = false
 
     @Environment(\.dreamTheme) private var theme
 
@@ -135,10 +138,10 @@ struct DreamSegment<Value: Hashable>: View {
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 1.5)
-                        .foregroundStyle(selection == opt.value ? .white : theme.textDim)
+                        .foregroundStyle(selection == opt.value && !dimmed ? .white : theme.textDim)
                         .background(
                             RoundedRectangle(cornerRadius: 3)
-                                .fill(selection == opt.value ? theme.accent : Color.clear)
+                                .fill(selection == opt.value && !dimmed ? theme.accent : Color.clear)
                         )
                         .contentShape(Rectangle())
                 }
@@ -154,6 +157,7 @@ struct DreamSegment<Value: Hashable>: View {
             RoundedRectangle(cornerRadius: 4)
                 .strokeBorder(theme.line, lineWidth: 1)
         )
+        .opacity(dimmed ? 0.5 : 1.0)
     }
 }
 

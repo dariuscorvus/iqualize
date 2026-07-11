@@ -10,29 +10,32 @@ struct DreamFooter: View {
         VStack(spacing: 6) {
             // Row 1 — levels & routing.
             HStack(spacing: 10) {
-                bypassToggle
-                divider
                 gainSlider(label: "In", value: $vm.inGainDB, onChange: vm.applyInputGain)
                 gainSlider(label: "Out", value: $vm.outGainDB, onChange: vm.applyOutputGain)
                 balanceSlider
                 divider
                 channelSegment
-                Spacer(minLength: 8)
-                outputLabel
+                Spacer()
             }
 
             // Row 2 — spectrum, scale, and processing.
             HStack(spacing: 10) {
+                bypassToggle
+                divider
                 preEqToggle
                 postEqToggle
                 divider
-                autoScaleToggle
-                bandwidthDisplaySegment
                 maxGainSegment
+                autoScaleToggle
                 divider
                 peakLimiterToggle
+                divider
+                bandwidthDisplaySegment
                 Spacer()
             }
+
+            // Row 3 — output device, centered beneath the controls.
+            outputLabel
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -176,26 +179,27 @@ struct DreamFooter: View {
         DreamSegment(
             selection: Binding(
                 get: { Int(vm.maxGainDB) },
-                set: { vm.maxGainDB = Float($0); vm.applyMaxGain() }
+                set: { vm.maxGainDB = Float($0); vm.autoScale = false; vm.applyMaxGain() }
             ),
-            options: [(12, "±12"), (18, "±18"), (24, "±24")]
+            options: [(12, "±12"), (18, "±18"), (24, "±24")],
+            dimmed: vm.autoScale
         )
+        .help(vm.autoScale
+            ? "Auto-scale is on, so the graph's axis grows to fit the curve. Click a range to switch to that fixed range."
+            : "Graph axis range")
     }
 
     // MARK: - Output label
 
     @ViewBuilder
     private var outputLabel: some View {
-        HStack(spacing: 4) {
-            Text("Output:")
-                .foregroundStyle(theme.textMute)
-                .fixedSize()
-            Text(vm.outputDeviceName)
-                .foregroundStyle(theme.textDim)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .font(.system(size: 12))
+        Text(vm.outputDeviceName)
+            .font(.system(size: 11))
+            .foregroundStyle(theme.textMute)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: 320)
+            .help(vm.outputDeviceName)
     }
 
     // MARK: - Format

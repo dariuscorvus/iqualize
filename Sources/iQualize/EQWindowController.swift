@@ -117,12 +117,27 @@ final class EQWindowController: NSWindowController {
         viewModel.theme = preference
     }
 
-    // The color/fill settings are wired through Settings → UserDefaults; the canvas re-reads
-    // them on the next draw. Setters left as no-ops to preserve the public surface.
-    func syncPreEqLineColor(_ color: NSColor) {}
-    func syncPostEqLineColor(_ color: NSColor) {}
-    func syncPreEqFillEnabled(_ on: Bool) {}
-    func syncPostEqFillEnabled(_ on: Bool) {}
-    func syncPreEqFillColor(_ color: NSColor) {}
-    func syncPostEqFillColor(_ color: NSColor) {}
+    func syncPreEqLineColor(_ color: NSColor) {
+        viewModel.preEqLineColor = Color(nsColor: color)
+    }
+
+    func syncPostEqLineColor(_ color: NSColor) {
+        viewModel.postEqLineColor = Color(nsColor: color)
+    }
+
+    func syncPreEqFillEnabled(_ on: Bool) {
+        viewModel.preEqFillEnabled = on
+    }
+
+    func syncPostEqFillEnabled(_ on: Bool) {
+        viewModel.postEqFillEnabled = on
+    }
+
+    func syncPreEqFillColor(_ color: NSColor) {
+        viewModel.preEqFillColor = Color(nsColor: color)
+    }
+
+    func syncPostEqFillColor(_ color: NSColor) {
+        viewModel.postEqFillColor = Color(nsColor: color)
+    }
 }

@@ -196,10 +196,10 @@ struct EQCanvasView: View {
 
         // Real pre/post-EQ spectrum (only if engine is running and toggle is on)
         if vm.audioEngine.isRunning && vm.preEqEnabled {
-            drawRealSpectrum(into: &ctx, size: size, mags: scratch.preEqMags, color: theme.pre, fillColor: theme.pre.opacity(0.18), displayMax: displayMax)
+            drawRealSpectrum(into: &ctx, size: size, mags: scratch.preEqMags, color: vm.preEqLineColor, fillColor: vm.preEqFillEnabled ? vm.preEqFillColor.opacity(0.18) : nil, displayMax: displayMax)
         }
         if vm.audioEngine.isRunning && vm.postEqEnabled && !vm.bypass {
-            drawRealSpectrum(into: &ctx, size: size, mags: scratch.postEqMags, color: theme.post, fillColor: nil, displayMax: displayMax)
+            drawRealSpectrum(into: &ctx, size: size, mags: scratch.postEqMags, color: vm.postEqLineColor, fillColor: vm.postEqFillEnabled ? vm.postEqFillColor.opacity(0.18) : nil, displayMax: displayMax)
         }
 
         // Per-band ghost responses
@@ -310,20 +310,24 @@ struct EQCanvasView: View {
                 ctx.stroke(s, with: .color(Color(rgba: 0x141820, a: 0.85 * opacity)), lineWidth: 1.6)
             }
 
-            // dB / Hz labels
-            let dbText = formatDB(b.gain)
-            let hzText = formatHz(b.frequency)
-            let weightSel: Font.Weight = isSel ? .semibold : isHov ? .medium : .regular
-            let dbAlpha: Double = isSel ? (isLight ? 0.78 : 0.98) : isHov ? (isLight ? 0.62 : 0.86) : (isLight ? 0.42 : 0.62)
-            let hzAlpha: Double = isSel ? (isLight ? 0.55 : 0.70) : isHov ? (isLight ? 0.40 : 0.55) : (isLight ? 0.28 : 0.38)
-            let labelW: CGFloat = 60
-            let flip = x + knobR + 6 + labelW + 6 > W
-            let lx = flip ? x - knobR - 6 : x + knobR + 6
-            let dbView = Text(dbText).font(.system(size: isSel ? 12 : 11, weight: weightSel)).foregroundStyle(ink(dbAlpha))
-            let hzView = Text(hzText).font(.system(size: isSel ? 11 : 10, weight: isSel ? .medium : .regular)).foregroundStyle(ink(hzAlpha))
-            let anchor: UnitPoint = flip ? .trailing : .leading
-            ctx.draw(dbView, at: CGPoint(x: lx, y: y - 7), anchor: anchor)
-            ctx.draw(hzView, at: CGPoint(x: lx, y: y + 7), anchor: anchor)
+            // dB / Hz labels — only for the selected/hovered band; the readout grid below
+            // already surfaces this per-band, so showing it for every knob at once just
+            // clutters and overlaps when bands sit close together in frequency.
+            if isSel || isHov {
+                let dbText = formatDB(b.gain)
+                let hzText = formatHz(b.frequency)
+                let weightSel: Font.Weight = isSel ? .semibold : .medium
+                let dbAlpha: Double = isSel ? (isLight ? 0.78 : 0.98) : (isLight ? 0.62 : 0.86)
+                let hzAlpha: Double = isSel ? (isLight ? 0.55 : 0.70) : (isLight ? 0.40 : 0.55)
+                let labelW: CGFloat = 60
+                let flip = x + knobR + 6 + labelW + 6 > W
+                let lx = flip ? x - knobR - 6 : x + knobR + 6
+                let dbView = Text(dbText).font(.system(size: isSel ? 12 : 11, weight: weightSel)).foregroundStyle(ink(dbAlpha))
+                let hzView = Text(hzText).font(.system(size: isSel ? 11 : 10, weight: isSel ? .medium : .regular)).foregroundStyle(ink(hzAlpha))
+                let anchor: UnitPoint = flip ? .trailing : .leading
+                ctx.draw(dbView, at: CGPoint(x: lx, y: y - 7), anchor: anchor)
+                ctx.draw(hzView, at: CGPoint(x: lx, y: y + 7), anchor: anchor)
+            }
 
             // Bandwidth readout while dragging Q
             if isSel, let drag = dragState, drag.bandID == b.id, drag.mode == .bandwidth {
@@ -357,6 +361,12 @@ struct EQCanvasView: View {
             let db = max(-90.0, Double(smoothed[i]))
             let mapped = (db + 90.0) / 90.0 * (displayMax * 2) - displayMax
             pts.append(CGPoint(x: x, y: gainToY(mapped, H: H, maxDB: displayMax)))
+        }
+        // Extend flat into the edge margins (matching how the composite curve behaves there)
+        // instead of stopping short of the canvas edge at the 20 Hz / 20 kHz bins.
+        if let first = pts.first, let last = pts.last {
+            pts.insert(CGPoint(x: 0, y: first.y), at: 0)
+            pts.append(CGPoint(x: W, y: last.y))
         }
 
         if let fc = fillColor {
@@ -584,13 +594,20 @@ struct EQCanvasView: View {
 
     // MARK: - Math (mirrors iqualize-engine.js)
 
+    /// Horizontal margin reserved at 20 Hz and 20 kHz so a band knob sitting at either extreme
+    /// has room to render without being clipped by the canvas edge.
+    private static let chartLeftPad: CGFloat = 14
+    private static let chartRightPad: CGFloat = 14
+
     private func freqToX(_ f: Double, W: CGFloat) -> CGFloat {
+        let chartW = max(1, W - Self.chartLeftPad - Self.chartRightPad)
         let t = (log10(max(20.0, f)) - log10(20.0)) / (log10(20000.0) - log10(20.0))
-        return W * t
+        return Self.chartLeftPad + chartW * CGFloat(t)
     }
 
     private func xToFreq(_ x: CGFloat, W: CGFloat) -> Double {
-        let t = max(0, min(1, x / W))
+        let chartW = max(1, W - Self.chartLeftPad - Self.chartRightPad)
+        let t = max(0, min(1, (x - Self.chartLeftPad) / chartW))
         return pow(10.0, log10(20.0) + Double(t) * (log10(20000.0) - log10(20.0)))
     }
 
