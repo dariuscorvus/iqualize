@@ -17,6 +17,17 @@ Version lives in `Sources/iQualize/Info.plist` (`CFBundleShortVersionString` and
 - Multiple features in one PR = one minor bump
 - Always update both `CFBundleShortVersionString` (e.g. `0.4.0`) and `CFBundleVersion` (e.g. `0.4`)
 - You MUST check and bump the version on every PR — do not wait for the user to remind you
+- **Also update `CHANGELOG.md` in the same PR as the version bump.** Add a new `## [X.Y.Z] - YYYY-MM-DD` section above the previous entry, using the existing `### Added` / `### Changed` / `### Fixed` headings. This was missed for 0.32.1 (version bumped, changelog left undocumented) and had to be backfilled after the fact — don't let the version and the changelog drift apart.
+
+## Releasing
+
+Only do this when the user explicitly asks to cut/tag/publish a release — not automatically after merging a PR.
+
+1. Bump the version and update `CHANGELOG.md` (should already be done in the merge PR, per above — backfill on `main` first if it wasn't).
+2. Tag the merge commit on `main`: `git tag vX.Y.Z <commit>` (lightweight tag, matching every existing tag in this repo) then `git push origin vX.Y.Z`.
+3. Build the installer: `bash create-dmg.sh` — builds, signs, and packages `iQualize-X.Y.Z.dmg` in the repo root.
+4. Publish the GitHub Release with the DMG attached: `gh release create vX.Y.Z iQualize-X.Y.Z.dmg --title "vX.Y.Z — <short description>" --notes "..."`. Look at a recent release (`gh release view vX.Y.Z-1`) for the notes format — highlights list, a link to the CHANGELOG diff, and the Gatekeeper `xattr -dr com.apple.quarantine` install instructions.
+5. Publishing a Release (step 4) is a distinct public action from tagging (step 2) — confirm with the user separately before running `gh release create`, even if they already approved the tag.
 
 ## Task Tracking
 
