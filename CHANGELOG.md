@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.38.0] - 2026-07-12
+
+### Added
+- `iqualize` command line tool for controlling a running iQualize instance without touching the menu bar — check status, list/switch presets, toggle bypass, and get/set input & output gain, all scriptable from the shell (#90). Install it from Settings → General → "Install Command Line Tool"
+
 ## [0.37.1] - 2026-07-12
 
 ### Fixed

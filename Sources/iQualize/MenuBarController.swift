@@ -1,8 +1,9 @@
 import AppKit
+import IQControlProtocol
 
 @available(macOS 14.2, *)
 @MainActor
-final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
+final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLICommandHandling {
     private var statusItem: NSStatusItem!
     private let audioEngine: AudioEngine
     private let presetStore: PresetStore
@@ -206,12 +207,19 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
             return
         }
 
-        guard let preset = presetStore.preset(for: id) else { return }
+        applyPreset(id: id)
+    }
+
+    /// Switches the active preset. Shared by the menu's `selectPreset(_:)` and the CLI.
+    @discardableResult
+    func applyPreset(id: UUID) -> Bool {
+        guard let preset = presetStore.preset(for: id) else { return false }
         audioEngine.activePreset = preset
         var s = iQualizeState.load()
         s.selectedPresetID = preset.id
         s.save()
         eqWindowController?.syncUIToPreset()
+        return true
     }
 
     @objc private func openEQSettings(_ sender: NSMenuItem) {
@@ -260,13 +268,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
     }
 
     @objc private func toggleBypass(_ sender: NSMenuItem) {
-        audioEngine.bypassed.toggle()
-        var s = iQualizeState.load()
-        s.bypassed = audioEngine.bypassed
-        s.save()
-        updateIcon()
-        eqWindowController?.syncBypass(audioEngine.bypassed)
-        settingsWindowController?.syncBypass(audioEngine.bypassed)
+        toggleBypassFromMenu()
     }
 
     func showSettings() {
@@ -280,13 +282,103 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
     }
 
     func toggleBypassFromMenu() {
-        audioEngine.bypassed.toggle()
+        setBypassed(!audioEngine.bypassed)
+    }
+
+    /// Sets bypass state and syncs the menu icon + any open windows. Shared by the menu
+    /// toggle and the CLI.
+    func setBypassed(_ bypassed: Bool) {
+        audioEngine.bypassed = bypassed
         var s = iQualizeState.load()
-        s.bypassed = audioEngine.bypassed
+        s.bypassed = bypassed
         s.save()
         updateIcon()
-        eqWindowController?.syncBypass(audioEngine.bypassed)
-        settingsWindowController?.syncBypass(audioEngine.bypassed)
+        eqWindowController?.syncBypass(bypassed)
+        settingsWindowController?.syncBypass(bypassed)
+    }
+
+    // MARK: - CLI Support
+
+    /// Toggles bypass and returns the new state, for the CLI's `bypass toggle`.
+    @discardableResult
+    func toggleBypassed() -> Bool {
+        let newValue = !audioEngine.bypassed
+        setBypassed(newValue)
+        return newValue
+    }
+
+    /// Sets input gain in dB, forking the active preset if it's built-in and gain isn't
+    /// shared globally — mirrors `DreamViewModel.applyInputGain`
+    /// (Sources/iQualize/DreamUI/DreamViewModel.swift), plus persisting `selectedPresetID`
+    /// so a fork survives a relaunch instead of reverting to the built-in original.
+    func setInputGain(_ db: Float) {
+        if audioEngine.gainIsGlobal {
+            audioEngine.inputGainDB = db
+            var s = iQualizeState.load()
+            s.inputGainDB = db
+            s.save()
+        } else {
+            var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+            preset.inputGainDB = db
+            audioEngine.activePreset = preset
+            presetStore.saveCustomPreset(preset)
+            var s = iQualizeState.load()
+            s.selectedPresetID = preset.id
+            s.save()
+        }
+        eqWindowController?.syncUIToPreset()
+    }
+
+    /// Sets output gain in dB — same fork-if-built-in rule as `setInputGain`.
+    func setOutputGain(_ db: Float) {
+        if audioEngine.gainIsGlobal {
+            audioEngine.outputGainDB = db
+            var s = iQualizeState.load()
+            s.outputGainDB = db
+            s.save()
+        } else {
+            var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+            preset.outputGainDB = db
+            audioEngine.activePreset = preset
+            presetStore.saveCustomPreset(preset)
+            var s = iQualizeState.load()
+            s.selectedPresetID = preset.id
+            s.save()
+        }
+        eqWindowController?.syncUIToPreset()
+    }
+
+    /// Resolves a preset by UUID string or case-insensitive exact name match.
+    func resolvePreset(idOrName: String) -> EQPresetData? {
+        if let id = UUID(uuidString: idOrName), let preset = presetStore.preset(for: id) {
+            return preset
+        }
+        return presetStore.allPresets.first { $0.name.caseInsensitiveCompare(idOrName) == .orderedSame }
+    }
+
+    func statusSnapshot() -> CLIStatusPayload {
+        CLIStatusPayload(
+            bypassed: audioEngine.bypassed,
+            activePresetID: audioEngine.activePreset.id,
+            activePresetName: audioEngine.activePreset.name,
+            inputGainDB: audioEngine.inputGainDB,
+            outputGainDB: audioEngine.outputGainDB,
+            gainIsGlobal: audioEngine.gainIsGlobal,
+            outputDeviceName: audioEngine.outputDeviceName,
+            isRunning: audioEngine.isRunning
+        )
+    }
+
+    func listPresetSummaries() -> [CLIPresetSummary] {
+        presetStore.allPresets.map { preset in
+            CLIPresetSummary(
+                id: preset.id,
+                name: preset.name,
+                isBuiltIn: preset.isBuiltIn,
+                isFavorite: presetStore.isFavorite(preset.id),
+                isActive: preset.id == audioEngine.activePreset.id
+            )
+        }
     }
 
     @objc func openHelp(_ sender: Any?) {

@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var menuBarController: MenuBarController!
     private var audioEngine: AudioEngine!
     private var presetStore: PresetStore!
+    private var cliControlServer: CLIControlServer!
     private var wasRunningBeforeSleep = false
     var isRealQuit = false
 
@@ -21,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         audioEngine = AudioEngine()
         presetStore = PresetStore()
         menuBarController = MenuBarController(audioEngine: audioEngine, presetStore: presetStore)
+
+        cliControlServer = CLIControlServer(handler: menuBarController)
+        cliControlServer.start()
 
         // Sync login item state (user may have changed it in System Settings)
         var launchState = iQualizeState.load()
@@ -82,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        cliControlServer.stop()
         audioEngine.stop()
     }
 
