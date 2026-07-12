@@ -14,7 +14,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
         self.audioEngine = audioEngine
         self.presetStore = presetStore
         super.init()
-        let state = iQualizeState.load()
+        var state = iQualizeState.load()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
@@ -31,6 +31,10 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
         audioEngine.gainIsGlobal = state.linkGainGlobally
         if let preset = presetStore.preset(for: state.selectedPresetID) {
             audioEngine.activePreset = preset
+        } else {
+            audioEngine.activePreset = .flat
+            state.selectedPresetID = EQPresetData.flat.id
+            state.save()
         }
         audioEngine.peakLimiter = state.peakLimiter
         audioEngine.maxGainDB = state.maxGainDB
@@ -102,7 +106,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate {
         let builtInHeader = NSMenuItem(title: "Built-in", action: nil, keyEquivalent: "")
         builtInHeader.isEnabled = false
         presetSubmenu.addItem(builtInHeader)
-        for preset in EQPresetData.builtInPresets {
+        for preset in presetStore.allPresets.filter(\.isBuiltIn) {
             presetSubmenu.addItem(presetItem(for: preset))
         }
 

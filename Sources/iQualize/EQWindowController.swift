@@ -53,12 +53,18 @@ final class EQWindowController: NSWindowController {
             self?.refreshWindowTitle()
         }
 
-        // Restore active preset.
-        let state = iQualizeState.load()
+        // Restore active preset. Falls back to Flat if the persisted ID no longer resolves
+        // (e.g. it pointed at a built-in that's since been hidden), correcting persisted state
+        // so this doesn't repeat on next launch.
+        var state = iQualizeState.load()
         if let preset = presetStore.preset(for: state.selectedPresetID) {
             audioEngine.activePreset = preset
-            viewModel.syncFromAudioEngine(initial: true)
+        } else {
+            audioEngine.activePreset = .flat
+            state.selectedPresetID = EQPresetData.flat.id
+            state.save()
         }
+        viewModel.syncFromAudioEngine(initial: true)
 
         viewModel.onTitleShouldUpdate = { [weak self] in self?.refreshWindowTitle() }
         refreshWindowTitle()

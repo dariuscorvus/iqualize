@@ -8,9 +8,11 @@ final class PresetStore {
     private(set) var customPresets: [EQPresetData] = []
     /// Pinned/favorited preset IDs, in the order they were favorited.
     private(set) var favoritePresetIDs: [UUID] = []
+    /// Built-in presets the user has deleted from their picker. Flat can never appear here.
+    private(set) var hiddenBuiltInPresetIDs: [UUID] = []
 
     var allPresets: [EQPresetData] {
-        EQPresetData.builtInPresets + customPresets
+        EQPresetData.builtInPresets.filter { !hiddenBuiltInPresetIDs.contains($0.id) } + customPresets
     }
 
     /// Favorited presets, in favorite order. Skips IDs that no longer resolve to a preset.
@@ -18,8 +20,15 @@ final class PresetStore {
         favoritePresetIDs.compactMap { preset(for: $0) }
     }
 
+    /// Built-in presets currently hidden from the picker — shown in the Preset Browser's
+    /// iQualize tab so they can be brought back.
+    var hiddenBuiltInPresets: [EQPresetData] {
+        EQPresetData.builtInPresets.filter { hiddenBuiltInPresetIDs.contains($0.id) }
+    }
+
     private static let key = "com.iqualize.customPresets"
     private static let favoritesKey = "com.iqualize.favoritePresetIDs"
+    private static let hiddenBuiltInsKey = "com.iqualize.hiddenBuiltInPresetIDs"
 
     init() {
         load()
@@ -60,6 +69,24 @@ final class PresetStore {
         }
     }
 
+    /// Hides a built-in preset from the picker. Flat is protected — several places in the app
+    /// assume it always exists as a safe fallback, so it can never be hidden.
+    func hideBuiltInPreset(id: UUID) {
+        guard id != EQPresetData.flat.id, !hiddenBuiltInPresetIDs.contains(id) else { return }
+        hiddenBuiltInPresetIDs.append(id)
+        persistHiddenBuiltIns()
+        if favoritePresetIDs.contains(id) {
+            favoritePresetIDs.removeAll { $0 == id }
+            persistFavorites()
+        }
+    }
+
+    /// Brings a hidden built-in preset back into the picker.
+    func restoreBuiltInPreset(id: UUID) {
+        hiddenBuiltInPresetIDs.removeAll { $0 == id }
+        persistHiddenBuiltIns()
+    }
+
     /// Returns a "(Custom)" fork of `preset` (deduped name against `allPresets`) if it's
     /// built-in; returns `preset` unchanged otherwise. Pure — does not persist and does not
     /// touch AudioEngine; callers decide whether/when to call `saveCustomPreset`.
@@ -93,6 +120,10 @@ final class PresetStore {
            let ids = try? JSONDecoder().decode([UUID].self, from: data) {
             favoritePresetIDs = ids
         }
+        if let data = UserDefaults.standard.data(forKey: Self.hiddenBuiltInsKey),
+           let ids = try? JSONDecoder().decode([UUID].self, from: data) {
+            hiddenBuiltInPresetIDs = ids
+        }
     }
 
     private func persist() {
@@ -104,6 +135,12 @@ final class PresetStore {
     private func persistFavorites() {
         if let data = try? JSONEncoder().encode(favoritePresetIDs) {
             UserDefaults.standard.set(data, forKey: Self.favoritesKey)
+        }
+    }
+
+    private func persistHiddenBuiltIns() {
+        if let data = try? JSONEncoder().encode(hiddenBuiltInPresetIDs) {
+            UserDefaults.standard.set(data, forKey: Self.hiddenBuiltInsKey)
         }
     }
 }

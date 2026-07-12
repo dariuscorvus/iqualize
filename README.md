@@ -76,11 +76,12 @@ open /Applications/iQualize.app
 
 - Built-in presets: Flat, Bass Boost, Vocal Clarity, Loudness, Treble Boost, Podcast, Techno, Deep House, Hard Techno, Minimal, American Rap, German Rap
 - Create, rename, overwrite, and delete custom presets
+- Built-in presets can be deleted too (except Flat) if you don't want them cluttering your picker — bring a deleted one back anytime from the Preset Browser's iQualize tab
 - Built-in presets auto-fork when edited (non-destructive)
 - In/Out dB gain can be stored per-preset (default) or shared globally across all presets — see Settings → General
 - Unsaved changes indicator (asterisk in title)
 - Import/export as `.iqpreset` JSON files with batch import and overwrite protection — also accepts AutoEQ `ParametricEQ.txt`/`GraphicEQ.txt` and OPRA `eq_info.json` files
-- Preset Browser: search and import community headphone/IEM EQ profiles directly from the [OPRA](https://opra.roon.app/) database, no manual file download needed
+- Preset Browser: an OPRA tab to search and import community headphone/IEM EQ profiles directly from the [OPRA](https://opra.roon.app/) database, and an iQualize tab to restore any built-in presets you've deleted
 - Quick switching from the menu bar or EQ window picker
 
 #### Preset Format

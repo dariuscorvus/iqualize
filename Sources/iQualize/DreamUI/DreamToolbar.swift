@@ -80,7 +80,7 @@ struct DreamToolbar: View {
                 .keyboardShortcut("s", modifiers: [.command, .shift])
             Divider()
             Button("Import Preset…") { vm.importPresets() }
-            Button("Browse OPRA Presets…") { vm.showPresetBrowser() }
+            Button("Preset Browser…") { vm.showPresetBrowser() }
             Button("Export Preset…") { vm.exportActivePreset() }
         } label: {
             Text("Save")
@@ -94,7 +94,7 @@ struct DreamToolbar: View {
         Button("Reset") { vm.resetToSnapshot() }
             .disabled(!vm.isModified)
         Button("Delete") { vm.deleteCurrentPreset() }
-            .disabled(vm.isBuiltIn)
+            .disabled(vm.activePresetID == EQPresetData.flat.id)
     }
 
     @ViewBuilder
