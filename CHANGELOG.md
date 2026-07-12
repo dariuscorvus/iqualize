@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.40.1] - 2026-07-12
+
+### Fixed
+- App launched after iQualize (e.g. Discord) had no audio output until iQualize was quit (#87). The global process tap doesn't reliably pick up processes that start after it, so iQualize now polls for newly-appeared Core Audio processes every 2s while running and restarts the tap when one shows up, so late-launching apps get captured without needing a manual device switch or restart
+
 ## [0.40.0] - 2026-07-12
 
 ### Added
