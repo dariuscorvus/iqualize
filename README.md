@@ -79,7 +79,8 @@ open /Applications/iQualize.app
 - Built-in presets auto-fork when edited (non-destructive)
 - In/Out dB gain can be stored per-preset (default) or shared globally across all presets — see Settings → General
 - Unsaved changes indicator (asterisk in title)
-- Import/export as `.iqpreset` JSON files with batch import and overwrite protection
+- Import/export as `.iqpreset` JSON files with batch import and overwrite protection — also accepts AutoEQ `ParametricEQ.txt`/`GraphicEQ.txt` and OPRA `eq_info.json` files
+- Preset Browser: search and import community headphone/IEM EQ profiles directly from the [OPRA](https://opra.roon.app/) database, no manual file download needed
 - Quick switching from the menu bar or EQ window picker
 
 #### Preset Format

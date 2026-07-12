@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.36.0] - 2026-07-12
+
+### Added
+- Preset Browser: search and import community headphone/IEM EQ profiles directly from the OPRA database (opra.roon.app) without hunting down and downloading a file first. Browse by vendor/product, pick from the available community-contributed curves for that model, and import in one click — reuses the existing AutoEQ/OPRA import path under the hood
+
 ## [0.35.0] - 2026-07-12
 
 ### Added
