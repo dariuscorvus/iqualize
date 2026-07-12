@@ -119,7 +119,7 @@ final class AudioEngine {
 
     /// When true, `inputGainDB`/`outputGainDB` are shared across all presets and untouched
     /// by preset switches. When false, they're resolved from `activePreset` on every switch.
-    var gainIsGlobal: Bool = true
+    var gainIsGlobal: Bool = false
 
     var peakLimiter: Bool = true {
         didSet { applyBands() }

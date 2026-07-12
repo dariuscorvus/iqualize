@@ -2,6 +2,14 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.35.0] - 2026-07-12
+
+### Added
+- Import Preset… now also accepts AutoEQ `ParametricEQ.txt`/`GraphicEQ.txt` and OPRA `eq_info.json` files alongside iQualize's own format, so community EQ profiles for headphones/IEMs can be dropped in directly. GraphicEQ curves are resampled onto the app's 31-band ceiling; each format's preamp/gain value is carried over as the preset's input gain
+
+### Changed
+- Per-preset In/Out dB is now the default for new installs, instead of sharing one gain value across all presets — matches the imported preamp/gain value from AutoEQ/OPRA presets landing on the preset itself rather than being silently ignored until "Share In/Out dB across all presets" was manually turned off in Settings
+
 ## [0.34.0] - 2026-07-11
 
 ### Added
