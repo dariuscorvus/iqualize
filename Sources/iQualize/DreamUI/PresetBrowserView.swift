@@ -1,9 +1,42 @@
 import SwiftUI
 
+/// Top-level Preset Browser container: a catalog picker switching between OPRA's community
+/// database and iQualize's own built-in presets the user has hidden from their picker.
+@available(macOS 14.2, *)
+struct PresetBrowserView: View {
+    let presetStore: PresetStore
+    let onImportOPRA: (OPRAProductEntry, OPRACurveEntry) -> Void
+
+    private enum Catalog: String, CaseIterable {
+        case opra = "OPRA"
+        case iqualize = "iQualize"
+    }
+
+    @State private var catalog: Catalog = .opra
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Catalog", selection: $catalog) {
+                ForEach(Catalog.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(8)
+            Divider()
+            switch catalog {
+            case .opra:
+                OPRACatalogBrowserView(onImport: onImportOPRA)
+            case .iqualize:
+                IQualizeCatalogView(presetStore: presetStore)
+            }
+        }
+    }
+}
+
 /// Search-and-import UI for OPRA's community headphone EQ database. Sidebar lists matching
 /// products; selecting one shows its available community EQ curves in the detail pane.
 @available(macOS 14.2, *)
-struct PresetBrowserView: View {
+struct OPRACatalogBrowserView: View {
     let onImport: (OPRAProductEntry, OPRACurveEntry) -> Void
 
     @State private var products: [OPRAProductEntry] = []
@@ -116,6 +149,31 @@ struct PresetBrowserView: View {
             loadState = .loaded
         } catch {
             loadState = .failed(error.localizedDescription)
+        }
+    }
+}
+
+/// Lists built-in presets the user has deleted from their picker, with a one-click way to
+/// bring each back. Unlike an OPRA import, restoring doesn't switch the active EQ curve —
+/// it just makes the preset selectable again from the normal preset picker.
+@available(macOS 14.2, *)
+struct IQualizeCatalogView: View {
+    let presetStore: PresetStore
+
+    var body: some View {
+        let hidden = presetStore.hiddenBuiltInPresets
+        if hidden.isEmpty {
+            Text("All built-in presets are already in your list")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List(hidden) { preset in
+                HStack {
+                    Text(preset.name)
+                    Spacer()
+                    Button("Restore") { presetStore.restoreBuiltInPreset(id: preset.id) }
+                }
+            }
         }
     }
 }

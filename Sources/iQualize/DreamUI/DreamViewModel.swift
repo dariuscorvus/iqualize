@@ -582,14 +582,21 @@ final class DreamViewModel {
     }
 
     func deleteCurrentPreset() {
-        guard !isBuiltIn else { return }
-        presetStore.deleteCustomPreset(id: activePresetID)
+        guard activePresetID != EQPresetData.flat.id else { return }
+        if isBuiltIn {
+            presetStore.hideBuiltInPreset(id: activePresetID)
+        } else {
+            presetStore.deleteCustomPreset(id: activePresetID)
+        }
         let old = audioEngine.activePreset
         audioEngine.activePreset = .flat
         savedSnapshot = .flat
         isModified = false
         syncFromAudioEngine()
         registerUndo(actionName: "Delete Preset", oldPreset: old)
+        var s = iQualizeState.load()
+        s.selectedPresetID = EQPresetData.flat.id
+        s.save()
     }
 
     // MARK: - Undo / Redo
@@ -752,14 +759,14 @@ final class DreamViewModel {
         return preset
     }
 
-    // MARK: - OPRA Preset Browser
+    // MARK: - Preset Browser
 
     private var presetBrowserWindowController: PresetBrowserWindowController?
 
-    /// Opens (or refocuses) the OPRA Preset Browser window.
+    /// Opens (or refocuses) the Preset Browser window (OPRA tab + iQualize tab).
     func showPresetBrowser() {
         if presetBrowserWindowController == nil {
-            presetBrowserWindowController = PresetBrowserWindowController { [weak self] product, curve in
+            presetBrowserWindowController = PresetBrowserWindowController(presetStore: presetStore) { [weak self] product, curve in
                 self?.importOPRACurve(product: product, curve: curve)
             }
         }

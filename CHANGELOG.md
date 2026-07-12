@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.37.0] - 2026-07-12
+
+### Added
+- Built-in presets can now be deleted (except Flat, which stays as a safe fallback) — useful if you don't want the app's more opinionated presets (Hard Techno, German Rap, DEADBEEF, etc.) cluttering your picker. Deleted ones aren't gone for good: the Preset Browser (Save/Import menu → "Preset Browser…") now has an **iQualize** tab alongside OPRA, listing anything you've deleted with a one-click Restore
+
 ## [0.36.0] - 2026-07-12
 
 ### Added
