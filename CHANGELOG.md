@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.39.0] - 2026-07-12
+
+### Changed
+- Made the CLI's install step harder to miss: Settings → General now shows a caption under "Install Command Line Tool" explaining what it does and that you need a new Terminal window afterward, and the README's Command Line section leads with setup instead of burying it in a usage example
+
 ## [0.38.0] - 2026-07-12
 
 ### Added
