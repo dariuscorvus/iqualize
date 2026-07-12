@@ -56,7 +56,7 @@ final class DreamViewModel {
     var postEqEnabled: Bool = false
     var inGainDB: Float = 0
     var outGainDB: Float = 0
-    var gainIsGlobal: Bool = true
+    var gainIsGlobal: Bool = false
     var balance: Float = 0
     var autoScale: Bool = true
     var maxGainDB: Float = 12
@@ -644,10 +644,12 @@ final class DreamViewModel {
     }
 
     /// Import one or more preset files via an osascript-driven open dialog (multi-select).
-    /// For each imported preset shows a rename/overwrite dialog matching the AppKit version.
+    /// Recognizes iQualize's native format as well as AutoEQ ParametricEQ.txt/GraphicEQ.txt
+    /// and OPRA eq_info.json (see `PresetImporter`). For each imported preset shows a
+    /// rename/overwrite dialog matching the AppKit version.
     func importPresets() {
         let script = """
-        set fileList to choose file of type {"json", "iqpreset"} with prompt "Import Presets" with multiple selections allowed
+        set fileList to choose file of type {"json", "iqpreset", "txt"} with prompt "Import Presets" with multiple selections allowed
         set output to ""
         repeat with f in fileList
             set output to output & POSIX path of f & linefeed
@@ -663,10 +665,8 @@ final class DreamViewModel {
             let url = URL(fileURLWithPath: path)
             do {
                 let data = try Data(contentsOf: url)
-                let decoded = try JSONDecoder().decode(EQPresetData.self, from: data)
-                var importName = decoded.name.isEmpty
-                    ? url.deletingPathExtension().lastPathComponent
-                    : decoded.name
+                let parsed = try PresetImporter.parse(data: data, filename: url.lastPathComponent)
+                var importName = parsed.name ?? Self.defaultImportName(for: url)
 
                 let customNames = Set(presetStore.customPresets.map(\.name))
                 let nameExists = customNames.contains(importName)
@@ -717,9 +717,11 @@ final class DreamViewModel {
                 let preset = EQPresetData(
                     id: UUID(),
                     name: importName,
-                    bands: decoded.bands,
-                    rightBands: decoded.rightBands,
-                    isBuiltIn: false
+                    bands: parsed.bands,
+                    rightBands: parsed.rightBands,
+                    isBuiltIn: false,
+                    inputGainDB: parsed.inputGainDB,
+                    outputGainDB: parsed.outputGainDB
                 )
                 presetStore.saveCustomPreset(preset)
                 lastImported = preset
@@ -738,6 +740,19 @@ final class DreamViewModel {
             syncFromAudioEngine()
             registerUndo(actionName: "Import Preset", oldPreset: old)
         }
+    }
+
+    /// Derives a default preset name from an imported file's name, stripping AutoEQ's
+    /// conventional " ParametricEQ"/" GraphicEQ" filename suffix if present so e.g.
+    /// "Sennheiser HD 600 ParametricEQ.txt" defaults to "Sennheiser HD 600".
+    private static func defaultImportName(for url: URL) -> String {
+        let base = url.deletingPathExtension().lastPathComponent
+        for suffix in [" ParametricEQ", " GraphicEQ"] {
+            if base.range(of: suffix, options: [.caseInsensitive, .anchored, .backwards]) != nil {
+                return String(base.dropLast(suffix.count))
+            }
+        }
+        return base
     }
 
     /// Runs an AppleScript snippet via /usr/bin/osascript, returns trimmed stdout or nil.
