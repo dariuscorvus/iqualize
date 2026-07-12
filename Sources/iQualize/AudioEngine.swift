@@ -101,6 +101,8 @@ final class AudioEngine {
 
     @ObservationIgnored
     nonisolated(unsafe) private var deviceChangeListenerBlock: AudioObjectPropertyListenerBlock?
+    private var knownProcessObjectIDs: Set<AudioObjectID> = []
+    private var processListPollWorkItem: DispatchWorkItem?
     var onStateChange: (() -> Void)?
     /// Resolves a pinned preset for a device UID, if any. Wired by the caller that owns
     /// both AudioEngine and PresetStore — kept as a closure so AudioEngine stays decoupled
@@ -170,6 +172,7 @@ final class AudioEngine {
             outputDeviceName = "Unknown"
         }
         installDeviceChangeListener()
+        knownProcessObjectIDs = (try? getProcessObjectList()).map(Set.init) ?? []
     }
 
     deinit {
@@ -431,11 +434,17 @@ final class AudioEngine {
         )
 
         isRunning = true
+        knownProcessObjectIDs = (try? getProcessObjectList()).map(Set.init) ?? knownProcessObjectIDs
+        if processListPollWorkItem == nil {
+            scheduleProcessListPoll()
+        }
     }
 
     func stop() {
         guard isRunning else { return }
         isRunning = false
+        processListPollWorkItem?.cancel()
+        processListPollWorkItem = nil
 
         rtRingBuffer = nil
         ringBuffer = nil
@@ -592,17 +601,63 @@ final class AudioEngine {
             }
         }
 
-        if isRunning {
-            isRestarting = true
-            stop()
-            do {
-                try start()
-            } catch {
-                self.error = error.localizedDescription
-            }
-            isRestarting = false
-        }
-
+        restartTap()
         onStateChange?()
+    }
+
+    /// Stops and restarts the tap/aggregate device in place, guarded against reentrancy
+    /// from listener callbacks the restart itself can trigger (tearing down the aggregate
+    /// device fires a default-output-device notification).
+    private func restartTap() {
+        guard isRunning, !isRestarting else { return }
+        isRestarting = true
+        stop()
+        do {
+            try start()
+        } catch {
+            self.error = error.localizedDescription
+        }
+        isRestarting = false
+    }
+
+    // MARK: - New-process tap coverage
+    //
+    // The global process tap is supposed to dynamically pick up processes that start
+    // after it was created, but in practice a newly-launched app can end up muted
+    // without its audio actually flowing through the tap — i.e. silently dropped
+    // (see #87, e.g. Discord launched while iQualize is running). Restarting the tap
+    // once a new Core Audio process appears reliably picks it up (confirmed: manually
+    // switching output devices, which restarts the tap as a side effect, fixes Discord's
+    // audio without quitting iQualize).
+    //
+    // kAudioHardwarePropertyProcessObjectList is *supposed* to notify listeners of this,
+    // but verified experimentally that it goes silent for a process that itself holds an
+    // active CATap — the exact situation we're in. So instead of listening, poll the
+    // process list on an interval while running and restart the tap when it grows.
+    // Processes disappearing (e.g. quitting an app) never needs a tap restart.
+
+    private static let processListPollInterval: TimeInterval = 2.0
+
+    private func scheduleProcessListPoll() {
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.pollProcessList()
+        }
+        processListPollWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.processListPollInterval, execute: workItem)
+    }
+
+    private func pollProcessList() {
+        guard isRunning else { return }
+        let current = (try? getProcessObjectList()).map(Set.init) ?? knownProcessObjectIDs
+        let grew = !current.subtracting(knownProcessObjectIDs).isEmpty
+        knownProcessObjectIDs = current
+        if grew {
+            // restartTap() calls stop() then start(), and start() already reschedules
+            // the next poll cycle — scheduling again here would run two poll loops.
+            restartTap()
+            onStateChange?()
+            return
+        }
+        scheduleProcessListPoll()
     }
 }
