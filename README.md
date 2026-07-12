@@ -82,7 +82,9 @@ open /Applications/iQualize.app
 - Unsaved changes indicator (asterisk in title)
 - Import/export as `.iqpreset` JSON files with batch import and overwrite protection — also accepts AutoEQ `ParametricEQ.txt`/`GraphicEQ.txt` and OPRA `eq_info.json` files
 - Preset Browser: an OPRA tab to search and import community headphone/IEM EQ profiles directly from the [OPRA](https://opra.roon.app/) database, and an iQualize tab to restore any built-in presets you've deleted
-- Quick switching from the menu bar or EQ window picker
+- Quick switching from the menu bar or EQ window picker — both use the same native preset picker, with Favorites, Built-in, and Custom sections
+- Favorite presets (star icon, or ⌥-click a preset) to pin them to the top of the picker for one-click switching
+- Pin a preset to an output device (pin button in the EQ window toolbar, or from the menu bar) — it's recalled automatically whenever that device becomes the active audio output, including at launch
 
 #### Preset Format
 
@@ -128,7 +130,7 @@ Presets may also carry `inputGainDB` and `outputGainDB` (dB, optional — omitte
 - Option+click the menu bar icon to open the EQ window directly (skips the menu)
 - Presets submenu with checkmarks and active preset name in parent item — changes sync to the EQ window in real time
 - Bypass EQ toggle (Cmd+B) — pass audio through unprocessed; while bypassed, the Post-EQ spectrum line and its color/fill controls are hidden/disabled (post-EQ would otherwise just mirror pre-EQ)
-- Current output device display
+- Current output device display, with a pin/unpin item to remember a preset for that specific device
 - Help… (Cmd+?) — opens an in-app Help window rendering the README's Features section, with a "View latest on GitHub" link
 - About iQualize — shows version and a "View on GitHub" button that opens the project page in your default browser
 

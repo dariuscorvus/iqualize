@@ -28,10 +28,21 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
             self?.updateIcon()
         }
 
-        // Restore saved state and always start EQ
+        // Recall the preset pinned to a device the moment we switch to it.
+        audioEngine.pinnedPresetProvider = { [weak presetStore] uid in
+            presetStore?.pinnedPreset(forDeviceUID: uid)
+        }
+
+        // Restore saved state and always start EQ — a device pin for the current output
+        // takes priority over the last-selected preset, since it's an explicit user choice.
         audioEngine.gainIsGlobal = state.linkGainGlobally
-        if let preset = presetStore.preset(for: state.selectedPresetID) {
+        let startupPreset = audioEngine.outputDeviceUID
+            .flatMap { presetStore.pinnedPreset(forDeviceUID: $0) }
+            ?? presetStore.preset(for: state.selectedPresetID)
+        if let preset = startupPreset {
             audioEngine.activePreset = preset
+            state.selectedPresetID = preset.id
+            state.save()
         } else {
             audioEngine.activePreset = .flat
             state.selectedPresetID = EQPresetData.flat.id
@@ -84,48 +95,26 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
 
         menu.addItem(.separator())
 
-        // Favorites — pinned presets for one-click switching
-        let favorites = presetStore.favoritePresets
-        if !favorites.isEmpty {
-            for preset in favorites {
-                let item = NSMenuItem(title: preset.name,
-                                      action: #selector(selectPreset(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = preset.id.uuidString
-                item.state = audioEngine.activePreset.id == preset.id ? .on : .off
-                item.image = Self.pinImage
-                menu.addItem(item)
-            }
-            menu.addItem(.separator())
-        }
+        let activePresetID = audioEngine.activePreset.id
+        PresetMenuBuilder.addFavorites(
+            to: menu, presets: presetStore.favoritePresets, activePresetID: activePresetID,
+            onSelect: { [weak self] id in self?.selectPresetAndClose(id: id) },
+            onToggleFavorite: { [weak self] id in self?.toggleFavorite(id) ?? false }
+        )
 
         // Presets submenu
         let presetMenuItem = NSMenuItem(title: "Presets (\(audioEngine.activePreset.name))",
                                          action: nil, keyEquivalent: "")
         let presetSubmenu = NSMenu()
-
-        let builtInHeader = NSMenuItem(title: "Built-in", action: nil, keyEquivalent: "")
-        builtInHeader.isEnabled = false
-        presetSubmenu.addItem(builtInHeader)
-        for preset in presetStore.allPresets.filter(\.isBuiltIn) {
-            presetSubmenu.addItem(presetItem(for: preset))
-        }
-
-        if !presetStore.customPresets.isEmpty {
-            presetSubmenu.addItem(.separator())
-            let customHeader = NSMenuItem(title: "Custom", action: nil, keyEquivalent: "")
-            customHeader.isEnabled = false
-            presetSubmenu.addItem(customHeader)
-            for preset in presetStore.customPresets {
-                presetSubmenu.addItem(presetItem(for: preset))
-            }
-        }
-
-        presetSubmenu.addItem(.separator())
-        let pinHint = NSMenuItem(title: "⌥-click a preset to pin/unpin", action: nil, keyEquivalent: "")
-        pinHint.isEnabled = false
-        presetSubmenu.addItem(pinHint)
-
+        PresetMenuBuilder.addPresetSections(
+            to: presetSubmenu,
+            builtIn: presetStore.allPresets.filter(\.isBuiltIn),
+            custom: presetStore.customPresets,
+            favoriteIDs: Set(presetStore.favoritePresetIDs),
+            activePresetID: activePresetID,
+            onSelect: { [weak self] id in self?.selectPresetAndClose(id: id) },
+            onToggleFavorite: { [weak self] id in self?.toggleFavorite(id) ?? false }
+        )
         presetMenuItem.submenu = presetSubmenu
         menu.addItem(presetMenuItem)
 
@@ -141,11 +130,28 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
 
         menu.addItem(.separator())
 
-        // Output device (non-interactive)
+        // Output device (non-interactive) + device-pin toggle
         let outputItem = NSMenuItem(title: "Output: \(audioEngine.outputDeviceName)",
                                      action: nil, keyEquivalent: "")
         outputItem.isEnabled = false
         menu.addItem(outputItem)
+
+        if let uid = audioEngine.outputDeviceUID {
+            let pinnedID = presetStore.pinnedPresetID(forDeviceUID: uid)
+            let pinItem: NSMenuItem
+            if pinnedID == activePresetID {
+                pinItem = NSMenuItem(title: "Unpin \"\(audioEngine.activePreset.name)\" from This Device",
+                                      action: #selector(toggleDevicePin(_:)), keyEquivalent: "")
+            } else if let pinnedID, let pinnedName = presetStore.preset(for: pinnedID)?.name {
+                pinItem = NSMenuItem(title: "Re-pin \"\(audioEngine.activePreset.name)\" to This Device (was \"\(pinnedName)\")",
+                                      action: #selector(toggleDevicePin(_:)), keyEquivalent: "")
+            } else {
+                pinItem = NSMenuItem(title: "Pin \"\(audioEngine.activePreset.name)\" to This Device",
+                                      action: #selector(toggleDevicePin(_:)), keyEquivalent: "")
+            }
+            pinItem.target = self
+            menu.addItem(pinItem)
+        }
 
         // Error display
         if let error = audioEngine.error {
@@ -177,38 +183,27 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
 
     // MARK: - Presets
 
-    private static let pinImage: NSImage = {
-        let image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Pinned")!
-        image.isTemplate = true
-        return image
-    }()
+    private func selectPresetAndClose(id: UUID) {
+        applyPreset(id: id)
+        statusItem.menu?.cancelTracking()
+    }
 
-    private func presetItem(for preset: EQPresetData) -> NSMenuItem {
-        let item = NSMenuItem(title: preset.name,
-                              action: #selector(selectPreset(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = preset.id.uuidString
-        item.state = audioEngine.activePreset.id == preset.id ? .on : .off
-        item.indentationLevel = 1
-        if presetStore.isFavorite(preset.id) {
-            item.image = Self.pinImage
+    private func toggleFavorite(_ id: UUID) -> Bool {
+        presetStore.toggleFavorite(id)
+        return presetStore.isFavorite(id)
+    }
+
+    @objc private func toggleDevicePin(_ sender: NSMenuItem) {
+        guard let uid = audioEngine.outputDeviceUID else { return }
+        let activeID = audioEngine.activePreset.id
+        if presetStore.pinnedPresetID(forDeviceUID: uid) == activeID {
+            presetStore.unpinPreset(fromDeviceUID: uid)
+        } else {
+            presetStore.pinPreset(activeID, toDeviceUID: uid)
         }
-        return item
     }
 
     // MARK: - Actions
-
-    @objc private func selectPreset(_ sender: NSMenuItem) {
-        guard let uuidString = sender.representedObject as? String,
-              let id = UUID(uuidString: uuidString) else { return }
-
-        if NSEvent.modifierFlags.contains(.option) {
-            presetStore.toggleFavorite(id)
-            return
-        }
-
-        applyPreset(id: id)
-    }
 
     /// Switches the active preset. Shared by the menu's `selectPreset(_:)` and the CLI.
     @discardableResult

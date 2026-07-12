@@ -44,30 +44,13 @@ struct DreamToolbar: View {
 
     @ViewBuilder
     private var presetGroup: some View {
-        Menu {
-            let favorites = vm.presetStore.favoritePresets
-            if !favorites.isEmpty {
-                ForEach(favorites, id: \.id) { preset in
-                    presetButton(for: preset)
-                }
-                Divider()
-            }
-            ForEach(vm.presetStore.allPresets, id: \.id) { preset in
-                presetButton(for: preset)
-            }
-            Divider()
-            Text("⌥-click a preset to pin/unpin")
-        } label: {
-            HStack(spacing: 4) {
-                Text(presetButtonLabel)
+        PresetPickerButton(vm: vm, label: presetButtonLabel)
+            .fixedSize()
+            .overlay(alignment: .trailing) {
                 if vm.isModified {
-                    Circle().fill(theme.accent).frame(width: 5, height: 5)
+                    Circle().fill(theme.accent).frame(width: 5, height: 5).offset(x: 8)
                 }
             }
-        }
-        .menuStyle(.button)
-        .controlSize(.regular)
-        .fixedSize()
 
         Button("New") { vm.newPreset() }
 
@@ -109,6 +92,15 @@ struct DreamToolbar: View {
         .controlSize(.regular)
         .help("Snap band frequencies to semitones")
 
+        Button(action: { vm.toggleDevicePin() }) {
+            Image(systemName: vm.isCurrentDevicePinnedToActivePreset ? "pin.fill" : "pin")
+                .font(.system(size: 12, weight: .medium))
+        }
+        .controlSize(.regular)
+        .help(vm.isCurrentDevicePinnedToActivePreset
+              ? "Unpin from \(vm.outputDeviceName)"
+              : "Pin to \(vm.outputDeviceName)")
+
         Button(action: { vm.onOpenSettings?() }) {
             Image(systemName: "gearshape").font(.system(size: 12, weight: .medium))
         }
@@ -119,24 +111,5 @@ struct DreamToolbar: View {
     private var presetButtonLabel: String {
         let suffix = vm.isBuiltIn ? " (Built-in)" : ""
         return "\(vm.presetName)\(suffix)"
-    }
-
-    @ViewBuilder
-    private func presetButton(for preset: EQPresetData) -> some View {
-        Button(action: {
-            if NSEvent.modifierFlags.contains(.option) {
-                vm.presetStore.toggleFavorite(preset.id)
-            } else {
-                vm.loadPreset(id: preset.id)
-            }
-        }) {
-            if preset.id == vm.activePresetID {
-                Label(preset.name, systemImage: "checkmark")
-            } else if vm.presetStore.isFavorite(preset.id) {
-                Label(preset.name, systemImage: "pin.fill")
-            } else {
-                Text(preset.name)
-            }
-        }
     }
 }

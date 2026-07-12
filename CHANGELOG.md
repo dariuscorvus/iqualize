@@ -2,6 +2,17 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.40.0] - 2026-07-12
+
+### Added
+- Per-device EQ memory — pin a preset to an output device (from the EQ window toolbar or the menu bar) and it's recalled automatically whenever that device becomes the active output, including at app launch (#79)
+
+### Changed
+- Renamed "pin" to "favorite" for the existing favorite-preset feature (star icon instead of a pin icon) to avoid confusion with the new device pin
+- The in-app EQ window's preset picker is now the same native menu as the menu bar dropdown — Favorites/Built-in/Custom sections, consistent star/checkmark layout, and ⌥-click-to-favorite that doesn't close the menu, on both surfaces
+- Toggling a device pin or a favorite is now a plain click/⌥-click instead of requiring extra modifiers to distinguish pin from unpin
+- The EQ window's output-device label now shows the device's pinned preset name, if any
+
 ## [0.39.0] - 2026-07-12
 
 ### Changed

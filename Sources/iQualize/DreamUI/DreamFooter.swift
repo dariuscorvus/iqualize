@@ -191,15 +191,22 @@ struct DreamFooter: View {
 
     // MARK: - Output label
 
+    private var outputLabelText: String {
+        if let pinned = vm.pinnedPresetNameForCurrentDevice {
+            return "\(vm.outputDeviceName) · Pinned: \(pinned)"
+        }
+        return vm.outputDeviceName
+    }
+
     @ViewBuilder
     private var outputLabel: some View {
-        Text(vm.outputDeviceName)
+        Text(outputLabelText)
             .font(.system(size: 11))
             .foregroundStyle(theme.textMute)
             .lineLimit(1)
             .truncationMode(.tail)
             .frame(maxWidth: 320)
-            .help(vm.outputDeviceName)
+            .help(outputLabelText)
     }
 
     // MARK: - Format
