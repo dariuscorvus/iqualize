@@ -202,3 +202,19 @@ Every other approach we tried — tap-only aggregate, removing the explicit outp
 - `Sources/iQualize/AudioRingBuffer.swift` — no longer used; the helper writes directly to mmap'd shared memory. Deleted.
 - `sweepLeakedAggregates`, `logAggregateState`, related HAL plugin enumeration helpers in `AudioEngine.swift` — main app no longer creates aggregates, so these are dead. Removed.
 - `AVAudioRoutingArbiter` `begin`/`leave` — no observable effect with either category, both before and after the architectural split. Removed.
+
+## 2026-07-12: External research — "Now Playing" registration as an untried lever
+
+Checked Apple's public docs/WWDC material and public bug trackers for other system-audio apps (Background Music, eqMac) to see whether the CATap-owner-equals-renderer non-preemptibility finding above is documented anywhere, or whether other projects have a published fix.
+
+**Findings:**
+
+- The core finding (owning both a CATap and a render IOProc makes a process non-preemptible by the Continuity arbiter) is **not documented anywhere public** — not in Apple's docs, not in the WWDC23 session, not in any forum thread found. It appears to be something we discovered empirically and nobody else has published. Treat it as solid (we proved it via the `debugStopEngineKeepTap` isolation test) but don't expect Apple to confirm or guarantee it stays true across OS versions.
+- Background Music ([#186](https://github.com/kyleneideck/BackgroundMusic/issues/186), [#318](https://github.com/kyleneideck/BackgroundMusic/issues/318)) and eqMac ([#993](https://github.com/bitgapp/eqMac/issues/993), [#904](https://github.com/bitgapp/eqMac/issues/904)) — both use the same aggregate-device-wraps-the-real-output architecture iQualize used before this fix — have open, unresolved AirPods switching bugs in the same family as #71, with no published fix. This corroborates that the root cause is structural to that architecture pattern, not an iQualize-specific bug, and that the process-split approach here is a genuinely novel workaround rather than a known pattern we could have copied.
+- **New lever, not yet tried**: per [WWDC23-10233 "Enhance your app's audio experience with AirPods"](https://developer.apple.com/videos/play/wwdc2023/10233/), the automatic-switching algorithm's decision-making explicitly factors in **"Now Playing" registration** (`MPNowPlayingInfoCenter` / the AudioQueue/AURemoteIO equivalent) and input audio activity, separately from raw device-ownership state — it's how the algorithm "knows when long-form audio is playing" and "prioritizes accordingly." iQualize does not currently register Now Playing info anywhere.
+  - This would **not** replace the process-split fix — it doesn't touch the device-ownership block that split solves — but it's a documented, sanctioned signal we haven't experimented with, and it's plausible it could make the algorithm's switching decision faster/more reliable once the device claim itself is no longer blocking (i.e. it may matter most in the post-split world, not the pre-split one).
+  - Worth an experiment: does registering Now Playing info in the main app change perceived handoff latency or reliability on top of the capture-helper split?
+
+## Open questions (updated)
+
+- Does registering `MPNowPlayingInfoCenter` (Now Playing) in the main process change automatic-switching latency/reliability now that the process split has removed the device-ownership block? Untested.
