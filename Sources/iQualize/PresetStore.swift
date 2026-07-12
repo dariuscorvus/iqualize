@@ -10,6 +10,8 @@ final class PresetStore {
     private(set) var favoritePresetIDs: [UUID] = []
     /// Built-in presets the user has deleted from their picker. Flat can never appear here.
     private(set) var hiddenBuiltInPresetIDs: [UUID] = []
+    /// Preset pinned per output device, keyed by the device's stable CoreAudio UID.
+    private(set) var pinnedPresetIDByDeviceUID: [String: UUID] = [:]
 
     var allPresets: [EQPresetData] {
         EQPresetData.builtInPresets.filter { !hiddenBuiltInPresetIDs.contains($0.id) } + customPresets
@@ -29,6 +31,7 @@ final class PresetStore {
     private static let key = "com.iqualize.customPresets"
     private static let favoritesKey = "com.iqualize.favoritePresetIDs"
     private static let hiddenBuiltInsKey = "com.iqualize.hiddenBuiltInPresetIDs"
+    private static let devicePinsKey = "com.iqualize.pinnedPresetsByDevice"
 
     init() {
         load()
@@ -51,6 +54,24 @@ final class PresetStore {
         persistFavorites()
     }
 
+    func pinnedPresetID(forDeviceUID uid: String) -> UUID? {
+        pinnedPresetIDByDeviceUID[uid]
+    }
+
+    func pinnedPreset(forDeviceUID uid: String) -> EQPresetData? {
+        pinnedPresetID(forDeviceUID: uid).flatMap { preset(for: $0) }
+    }
+
+    func pinPreset(_ id: UUID, toDeviceUID uid: String) {
+        pinnedPresetIDByDeviceUID[uid] = id
+        persistDevicePins()
+    }
+
+    func unpinPreset(fromDeviceUID uid: String) {
+        pinnedPresetIDByDeviceUID.removeValue(forKey: uid)
+        persistDevicePins()
+    }
+
     func saveCustomPreset(_ preset: EQPresetData) {
         if let index = customPresets.firstIndex(where: { $0.id == preset.id }) {
             customPresets[index] = preset
@@ -67,6 +88,10 @@ final class PresetStore {
             favoritePresetIDs.removeAll { $0 == id }
             persistFavorites()
         }
+        if pinnedPresetIDByDeviceUID.values.contains(id) {
+            pinnedPresetIDByDeviceUID = pinnedPresetIDByDeviceUID.filter { $0.value != id }
+            persistDevicePins()
+        }
     }
 
     /// Hides a built-in preset from the picker. Flat is protected — several places in the app
@@ -78,6 +103,10 @@ final class PresetStore {
         if favoritePresetIDs.contains(id) {
             favoritePresetIDs.removeAll { $0 == id }
             persistFavorites()
+        }
+        if pinnedPresetIDByDeviceUID.values.contains(id) {
+            pinnedPresetIDByDeviceUID = pinnedPresetIDByDeviceUID.filter { $0.value != id }
+            persistDevicePins()
         }
     }
 
@@ -124,6 +153,10 @@ final class PresetStore {
            let ids = try? JSONDecoder().decode([UUID].self, from: data) {
             hiddenBuiltInPresetIDs = ids
         }
+        if let data = UserDefaults.standard.data(forKey: Self.devicePinsKey),
+           let pins = try? JSONDecoder().decode([String: UUID].self, from: data) {
+            pinnedPresetIDByDeviceUID = pins
+        }
     }
 
     private func persist() {
@@ -141,6 +174,12 @@ final class PresetStore {
     private func persistHiddenBuiltIns() {
         if let data = try? JSONEncoder().encode(hiddenBuiltInPresetIDs) {
             UserDefaults.standard.set(data, forKey: Self.hiddenBuiltInsKey)
+        }
+    }
+
+    private func persistDevicePins() {
+        if let data = try? JSONEncoder().encode(pinnedPresetIDByDeviceUID) {
+            UserDefaults.standard.set(data, forKey: Self.devicePinsKey)
         }
     }
 }

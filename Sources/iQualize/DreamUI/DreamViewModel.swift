@@ -69,6 +69,28 @@ final class DreamViewModel {
 
     var outputDeviceName: String { audioEngine.outputDeviceName }
 
+    /// Whether the active preset is the one pinned to the current output device.
+    var isCurrentDevicePinnedToActivePreset: Bool {
+        guard let uid = audioEngine.outputDeviceUID else { return false }
+        return presetStore.pinnedPresetID(forDeviceUID: uid) == activePresetID
+    }
+
+    /// Name of the preset pinned to the current output device, if any.
+    var pinnedPresetNameForCurrentDevice: String? {
+        guard let uid = audioEngine.outputDeviceUID else { return nil }
+        return presetStore.pinnedPreset(forDeviceUID: uid)?.name
+    }
+
+    /// Unpins if the active preset is already the one pinned here, otherwise pins it.
+    func toggleDevicePin() {
+        guard let uid = audioEngine.outputDeviceUID else { return }
+        if isCurrentDevicePinnedToActivePreset {
+            presetStore.unpinPreset(fromDeviceUID: uid)
+        } else {
+            presetStore.pinPreset(audioEngine.activePreset.id, toDeviceUID: uid)
+        }
+    }
+
     // Computed
     var canUndo: Bool { undoManager?.canUndo ?? false }
     var canRedo: Bool { undoManager?.canRedo ?? false }

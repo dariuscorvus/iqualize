@@ -86,6 +86,7 @@ private func renderCallback(
 final class AudioEngine {
     private(set) var isRunning = false
     private(set) var outputDeviceName = "Unknown"
+    private(set) var outputDeviceUID: String?
     private(set) var error: String?
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
@@ -101,6 +102,10 @@ final class AudioEngine {
     @ObservationIgnored
     nonisolated(unsafe) private var deviceChangeListenerBlock: AudioObjectPropertyListenerBlock?
     var onStateChange: (() -> Void)?
+    /// Resolves a pinned preset for a device UID, if any. Wired by the caller that owns
+    /// both AudioEngine and PresetStore — kept as a closure so AudioEngine stays decoupled
+    /// from the store type, same pattern as `onStateChange`.
+    var pinnedPresetProvider: ((String) -> EQPresetData?)?
 
     // Spectrum analyzers — one per tap point
     let preEqAnalyzer = SpectrumAnalyzer()
@@ -160,6 +165,7 @@ final class AudioEngine {
         do {
             let deviceID = try getDefaultOutputDeviceID()
             outputDeviceName = try getDeviceName(deviceID)
+            outputDeviceUID = try? getDeviceUID(deviceID)
         } catch {
             outputDeviceName = "Unknown"
         }
@@ -189,6 +195,7 @@ final class AudioEngine {
         let outputDeviceID = try getDefaultOutputDeviceID()
         let outputUID = try getDeviceUID(outputDeviceID)
         outputDeviceName = try getDeviceName(outputDeviceID)
+        outputDeviceUID = outputUID
 
         // 1. Translate our PID → AudioObjectID so we can exclude ourselves from the tap.
         //    Without this, the muted tap silences iQualize's own AVAudioEngine output.
@@ -571,9 +578,18 @@ final class AudioEngine {
     private func handleDeviceChange() {
         guard !isRestarting else { return }
 
-        if let deviceID = try? getDefaultOutputDeviceID(),
-           let name = try? getDeviceName(deviceID) {
-            outputDeviceName = name
+        if let deviceID = try? getDefaultOutputDeviceID() {
+            if let name = try? getDeviceName(deviceID) {
+                outputDeviceName = name
+            }
+            let uid = try? getDeviceUID(deviceID)
+            outputDeviceUID = uid
+            if let uid, let pinned = pinnedPresetProvider?(uid) {
+                activePreset = pinned
+                var s = iQualizeState.load()
+                s.selectedPresetID = pinned.id
+                s.save()
+            }
         }
 
         if isRunning {
