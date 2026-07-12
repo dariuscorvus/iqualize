@@ -848,6 +848,9 @@ final class DreamViewModel {
             audioEngine.activePreset = preset
             presetStore.saveCustomPreset(preset)
             savedSnapshot = preset
+            var s = iQualizeState.load()
+            s.selectedPresetID = preset.id
+            s.save()
         }
     }
 
@@ -862,6 +865,9 @@ final class DreamViewModel {
             audioEngine.activePreset = preset
             presetStore.saveCustomPreset(preset)
             savedSnapshot = preset
+            var s = iQualizeState.load()
+            s.selectedPresetID = preset.id
+            s.save()
         }
     }
 

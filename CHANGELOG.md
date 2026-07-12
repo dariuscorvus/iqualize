@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.37.1] - 2026-07-12
+
+### Fixed
+- Gain-slider edits in the EQ window while per-preset In/Out dB is active now correctly persist the forked "(Custom)" preset as the selected preset, so it's still active after quitting and relaunching instead of silently reverting to the original built-in preset
+
 ## [0.37.0] - 2026-07-12
 
 ### Added
