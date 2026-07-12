@@ -666,65 +666,10 @@ final class DreamViewModel {
             do {
                 let data = try Data(contentsOf: url)
                 let parsed = try PresetImporter.parse(data: data, filename: url.lastPathComponent)
-                var importName = parsed.name ?? Self.defaultImportName(for: url)
-
-                let customNames = Set(presetStore.customPresets.map(\.name))
-                let nameExists = customNames.contains(importName)
-
-                let alert = NSAlert()
-                alert.messageText = nameExists
-                    ? "A preset named \"\(importName)\" already exists."
-                    : "Import \"\(importName)\""
-                alert.informativeText = "You can change the preset name before importing."
-                alert.addButton(withTitle: nameExists ? "Overwrite" : "Import")
-                alert.addButton(withTitle: "Skip")
-
-                let nameField = NSTextField(frame: NSRect(x: 0, y: 0, width: 250, height: 24))
-                nameField.stringValue = importName
-                alert.accessoryView = nameField
-                alert.window.initialFirstResponder = nameField
-
-                // Live-update the action button label as the user types so it always reflects
-                // whether saving will overwrite an existing preset.
-                let actionButton = alert.buttons[0]
-                let observer = NotificationCenter.default.addObserver(
-                    forName: NSControl.textDidChangeNotification,
-                    object: nameField, queue: .main
-                ) { _ in
-                    let current = nameField.stringValue.trimmingCharacters(in: .whitespaces)
-                    actionButton.title = customNames.contains(current) ? "Overwrite" : "Import"
+                let suggestedName = parsed.name ?? Self.defaultImportName(for: url)
+                if let saved = saveImportedPreset(parsed, suggestedName: suggestedName) {
+                    lastImported = saved
                 }
-
-                let response = alert.runModal()
-                NotificationCenter.default.removeObserver(observer)
-                if response == .alertSecondButtonReturn { continue }
-
-                let finalName = nameField.stringValue.trimmingCharacters(in: .whitespaces)
-                if finalName.isEmpty { continue }
-                importName = finalName
-
-                if let existing = presetStore.customPresets.first(where: { $0.name == importName }) {
-                    let confirm = NSAlert()
-                    confirm.messageText = "Overwrite \"\(importName)\"?"
-                    confirm.informativeText = "This will replace the existing preset with the imported one."
-                    confirm.addButton(withTitle: "Overwrite")
-                    confirm.addButton(withTitle: "Cancel")
-                    confirm.alertStyle = .warning
-                    if confirm.runModal() != .alertFirstButtonReturn { continue }
-                    presetStore.deleteCustomPreset(id: existing.id)
-                }
-
-                let preset = EQPresetData(
-                    id: UUID(),
-                    name: importName,
-                    bands: parsed.bands,
-                    rightBands: parsed.rightBands,
-                    isBuiltIn: false,
-                    inputGainDB: parsed.inputGainDB,
-                    outputGainDB: parsed.outputGainDB
-                )
-                presetStore.saveCustomPreset(preset)
-                lastImported = preset
             } catch {
                 let alert = NSAlert(error: error)
                 alert.informativeText = "Failed to import \(url.lastPathComponent): \(error.localizedDescription)"
@@ -739,6 +684,104 @@ final class DreamViewModel {
             isModified = false
             syncFromAudioEngine()
             registerUndo(actionName: "Import Preset", oldPreset: old)
+        }
+    }
+
+    /// Shows the rename/overwrite dialog for a parsed preset and, if confirmed, saves it as a
+    /// custom preset. Returns the saved preset, or `nil` if the user skipped/cancelled/cleared
+    /// the name. Shared by the file-based import flow and the OPRA Preset Browser.
+    private func saveImportedPreset(_ parsed: ParsedPreset, suggestedName: String) -> EQPresetData? {
+        var importName = suggestedName
+
+        let customNames = Set(presetStore.customPresets.map(\.name))
+        let nameExists = customNames.contains(importName)
+
+        let alert = NSAlert()
+        alert.messageText = nameExists
+            ? "A preset named \"\(importName)\" already exists."
+            : "Import \"\(importName)\""
+        alert.informativeText = "You can change the preset name before importing."
+        alert.addButton(withTitle: nameExists ? "Overwrite" : "Import")
+        alert.addButton(withTitle: "Skip")
+
+        let nameField = NSTextField(frame: NSRect(x: 0, y: 0, width: 250, height: 24))
+        nameField.stringValue = importName
+        alert.accessoryView = nameField
+        alert.window.initialFirstResponder = nameField
+
+        // Live-update the action button label as the user types so it always reflects
+        // whether saving will overwrite an existing preset.
+        let actionButton = alert.buttons[0]
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSControl.textDidChangeNotification,
+            object: nameField, queue: .main
+        ) { _ in
+            let current = nameField.stringValue.trimmingCharacters(in: .whitespaces)
+            actionButton.title = customNames.contains(current) ? "Overwrite" : "Import"
+        }
+
+        let response = alert.runModal()
+        NotificationCenter.default.removeObserver(observer)
+        if response == .alertSecondButtonReturn { return nil }
+
+        let finalName = nameField.stringValue.trimmingCharacters(in: .whitespaces)
+        if finalName.isEmpty { return nil }
+        importName = finalName
+
+        if let existing = presetStore.customPresets.first(where: { $0.name == importName }) {
+            let confirm = NSAlert()
+            confirm.messageText = "Overwrite \"\(importName)\"?"
+            confirm.informativeText = "This will replace the existing preset with the imported one."
+            confirm.addButton(withTitle: "Overwrite")
+            confirm.addButton(withTitle: "Cancel")
+            confirm.alertStyle = .warning
+            if confirm.runModal() != .alertFirstButtonReturn { return nil }
+            presetStore.deleteCustomPreset(id: existing.id)
+        }
+
+        let preset = EQPresetData(
+            id: UUID(),
+            name: importName,
+            bands: parsed.bands,
+            rightBands: parsed.rightBands,
+            isBuiltIn: false,
+            inputGainDB: parsed.inputGainDB,
+            outputGainDB: parsed.outputGainDB
+        )
+        presetStore.saveCustomPreset(preset)
+        return preset
+    }
+
+    // MARK: - OPRA Preset Browser
+
+    private var presetBrowserWindowController: PresetBrowserWindowController?
+
+    /// Opens (or refocuses) the OPRA Preset Browser window.
+    func showPresetBrowser() {
+        if presetBrowserWindowController == nil {
+            presetBrowserWindowController = PresetBrowserWindowController { [weak self] product, curve in
+                self?.importOPRACurve(product: product, curve: curve)
+            }
+        }
+        presetBrowserWindowController?.showWindow(nil)
+        presetBrowserWindowController?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    private func importOPRACurve(product: OPRAProductEntry, curve: OPRACurveEntry) {
+        do {
+            let parsed = try PresetImporter.parse(data: curve.data, filename: product.productName)
+            let suggestedName = "\(product.vendorName) \(product.productName)"
+            guard let saved = saveImportedPreset(parsed, suggestedName: suggestedName) else { return }
+            let old = audioEngine.activePreset
+            audioEngine.activePreset = saved
+            savedSnapshot = saved
+            isModified = false
+            syncFromAudioEngine()
+            registerUndo(actionName: "Import Preset", oldPreset: old)
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.informativeText = "Failed to import \(product.vendorName) \(product.productName): \(error.localizedDescription)"
+            alert.runModal()
         }
     }
 

@@ -80,6 +80,7 @@ struct DreamToolbar: View {
                 .keyboardShortcut("s", modifiers: [.command, .shift])
             Divider()
             Button("Import Preset…") { vm.importPresets() }
+            Button("Browse OPRA Presets…") { vm.showPresetBrowser() }
             Button("Export Preset…") { vm.exportActivePreset() }
         } label: {
             Text("Save")
