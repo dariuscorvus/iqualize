@@ -239,6 +239,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         installCLIButton.isEnabled = !Self.cliAlreadyInstalled
         mainStack.addArrangedSubview(installCLIButton)
 
+        let cliHint = NSTextField(wrappingLabelWithString:
+            "Adds the `iqualize` command to Terminal — control iQualize without the menu bar. Open a new Terminal window after installing.")
+        cliHint.font = .systemFont(ofSize: 11)
+        cliHint.textColor = .secondaryLabelColor
+        mainStack.addArrangedSubview(cliHint)
+
         return mainStack
     }
 

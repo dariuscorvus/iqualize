@@ -170,8 +170,13 @@ Accessible via the gear icon in the EQ window, the Settings item in the menu bar
 
 Control a running iQualize instance without touching the menu bar — handy if you don't
 use it at all, and makes iQualize scriptable (Shortcuts, launchd jobs, keyboard-shortcut
-launchers, etc). Install it from Settings → General → "Install Command Line Tool" (or,
-for dev builds, `install.sh` symlinks it automatically).
+launchers, etc).
+
+**Setup (one-time):** open iQualize → Settings (Cmd+,) → General → **"Install Command
+Line Tool"**. This prompts for your admin password once and adds `iqualize` to your
+PATH. Open a **new** Terminal window afterward — a window that was already open won't
+pick it up. (Building from source instead? `install.sh` symlinks it automatically, no
+button needed.)
 
 ```
 iqualize                      # same as `iqualize status`
@@ -184,7 +189,8 @@ iqualize gain output [<dB>]
 ```
 
 If iQualize isn't running, the CLI launches it and retries for a few seconds before
-giving up.
+giving up. If Terminal still says `command not found` after installing, double-check
+you opened a new window/tab, and that `/usr/local/bin` is on your `PATH` (`echo $PATH`).
 
 ## Architecture
 
