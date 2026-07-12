@@ -240,9 +240,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         mainStack.addArrangedSubview(installCLIButton)
 
         let cliHint = NSTextField(wrappingLabelWithString:
-            "Adds the `iqualize` command to Terminal — control iQualize without the menu bar. Open a new Terminal window after installing.")
+            "Adds the `iqualize` command to Terminal. Open a new Terminal window after installing.")
         cliHint.font = .systemFont(ofSize: 11)
         cliHint.textColor = .secondaryLabelColor
+        // Without a capped layout width, a wrapping label reports its unwrapped single-line
+        // width as its intrinsic size — which would make it the widest row and blow out the
+        // window instead of wrapping. Cap it to the window's base content width so it wraps
+        // in place and never becomes the width driver.
+        cliHint.preferredMaxLayoutWidth = 280
         mainStack.addArrangedSubview(cliHint)
 
         return mainStack
