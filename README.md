@@ -166,6 +166,26 @@ Accessible via the gear icon in the EQ window, the Settings item in the menu bar
 - Codesigned for stable TCC permissions across rebuilds
 - Built with Swift Package Manager — no Xcode project needed
 
+### Command Line
+
+Control a running iQualize instance without touching the menu bar — handy if you don't
+use it at all, and makes iQualize scriptable (Shortcuts, launchd jobs, keyboard-shortcut
+launchers, etc). Install it from Settings → General → "Install Command Line Tool" (or,
+for dev builds, `install.sh` symlinks it automatically).
+
+```
+iqualize                      # same as `iqualize status`
+iqualize status               # bypass state, active preset, gain, output device
+iqualize presets               # list all presets (* = active, ♥ = favorite)
+iqualize preset "Bass Boost"   # switch the active preset by name or ID
+iqualize bypass [on|off|toggle]
+iqualize gain input [<dB>]     # omit the value to read the current one
+iqualize gain output [<dB>]
+```
+
+If iQualize isn't running, the CLI launches it and retries for a few seconds before
+giving up.
+
 ## Architecture
 
 > For the long version — why CATap, what fought back, and how the audio graph came together — read the blog post: [Building iQualize - A System-Wide EQ That Doesn't Suck](https://darius.codes/writing/building-iqualize).

@@ -7,12 +7,29 @@ let package = Package(
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/apple/swift-markdown.git", from: "0.4.0"),
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: [
+        .target(
+            name: "IQControlProtocol",
+            path: "Sources/IQControlProtocol"
+        ),
+        // Named "iqualize-cli", not "iqualize" — a same-named target would collide with
+        // the "iQualize" app target's binary on macOS's default case-insensitive filesystem.
+        // install.sh renames the built binary to "iqualize" when it copies it into place.
+        .executableTarget(
+            name: "iqualize-cli",
+            dependencies: [
+                "IQControlProtocol",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "Sources/iqualize-cli"
+        ),
         .executableTarget(
             name: "iQualize",
             dependencies: [
                 .product(name: "Markdown", package: "swift-markdown"),
+                "IQControlProtocol",
             ],
             path: "Sources/iQualize",
             exclude: ["Info.plist"],

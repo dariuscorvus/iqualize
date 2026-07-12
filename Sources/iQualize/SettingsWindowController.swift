@@ -28,6 +28,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var hideFromDockCheckbox: NSButton!
     private var startAtLoginCheckbox: NSButton!
     private var linkGainCheckbox: NSButton!
+    private var installCLIButton: NSButton!
 
     init(audioEngine: AudioEngine, presetStore: PresetStore, eqWindowController: EQWindowController?) {
         self.audioEngine = audioEngine
@@ -231,6 +232,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                                       target: self, action: #selector(toggleLinkGainGlobally(_:)))
         linkGainCheckbox.state = state.linkGainGlobally ? .on : .off
         mainStack.addArrangedSubview(linkGainCheckbox)
+
+        installCLIButton = NSButton(title: Self.cliInstallButtonTitle,
+                                     target: self, action: #selector(installCLITool(_:)))
+        installCLIButton.bezelStyle = .rounded
+        installCLIButton.isEnabled = !Self.cliAlreadyInstalled
+        mainStack.addArrangedSubview(installCLIButton)
 
         return mainStack
     }
@@ -504,5 +511,53 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         var state = iQualizeState.load()
         state.startAtLogin = SMAppService.mainApp.status == .enabled
         state.save()
+    }
+
+    // MARK: - Command Line Tool
+
+    private static let cliInstallPath = "/usr/local/bin/iqualize"
+    private static var bundledCLIPath: String {
+        Bundle.main.bundlePath + "/Contents/Resources/bin/iqualize"
+    }
+
+    private static var cliAlreadyInstalled: Bool {
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: cliInstallPath)) == bundledCLIPath
+    }
+
+    private static var cliInstallButtonTitle: String {
+        cliAlreadyInstalled ? "Command Line Tool Installed" : "Install Command Line Tool…"
+    }
+
+    /// Symlinks the CLI bundled in this app (Contents/Resources/bin/iqualize) into
+    /// /usr/local/bin, prompting for admin privileges once — the same pattern VS Code and
+    /// Sublime Text use for their `code`/`subl` shell commands.
+    @objc private func installCLITool(_ sender: NSButton) {
+        let cliPath = Self.bundledCLIPath
+        guard FileManager.default.fileExists(atPath: cliPath) else {
+            let alert = NSAlert()
+            alert.messageText = "Command line tool not found"
+            alert.informativeText = "The iqualize CLI binary wasn't found in this app bundle."
+            alert.runModal()
+            return
+        }
+
+        let script = "do shell script \"ln -sf '\(cliPath)' '\(Self.cliInstallPath)'\" with administrator privileges"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        do {
+            try process.run()
+            process.waitUntilExit()
+            if process.terminationStatus == 0 {
+                sender.title = Self.cliInstallButtonTitle
+                sender.isEnabled = !Self.cliAlreadyInstalled
+            }
+            // Non-zero exit is the user cancelling the admin prompt — not an error worth alerting on.
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Failed to install command line tool"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
     }
 }
