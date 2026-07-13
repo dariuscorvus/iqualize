@@ -7,12 +7,19 @@ import os.log
 
 private let appLog = OSLog(subsystem: "com.iqualize", category: "audio")
 
+/// Locate the capture helper executable inside the app bundle. Built as
+/// `iQualizeCapture` and installed at `Contents/Helpers/iQualizeCapture` by
+/// install.sh. See CONTINUITY.md for why capture lives in a separate process.
+func captureHelperURL() -> URL {
+    Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/iQualizeCapture")
+}
+
 // MARK: - Real-time Audio Callbacks (free functions, no actor isolation)
 // These run on Core Audio's IO thread. They MUST be free functions — not closures
 // defined inside a @MainActor class — because Swift 6 strict concurrency inserts
 // runtime isolation checks that crash on non-main threads.
 
-nonisolated(unsafe) private var rtRingBuffer: AudioRingBuffer?
+nonisolated(unsafe) private var rtCaptureClient: CaptureClient?
 nonisolated(unsafe) private var rtChannelCount: UInt32 = 2
 
 /// Scratch buffer for deinterleaving (allocated once, reused).
@@ -29,15 +36,16 @@ nonisolated(unsafe) private var rtBiquadChainL: BiquadFilterChain?
 nonisolated(unsafe) private var rtBiquadChainR: BiquadFilterChain?
 nonisolated(unsafe) private var rtSplitChannelActive: Bool = false
 
-/// AVAudioSourceNode render block: pulls interleaved audio from ring buffer,
-/// deinterleaves into separate channel buffers for the non-interleaved AVAudioEngine format.
+/// AVAudioSourceNode render block: pulls interleaved audio from the capture
+/// client's shared ring buffer, deinterleaves into separate channel buffers
+/// for the non-interleaved AVAudioEngine format.
 private func renderCallback(
     _: UnsafeMutablePointer<ObjCBool>,
     _: UnsafePointer<AudioTimeStamp>,
     frameCount: UInt32,
     audioBufferList: UnsafeMutablePointer<AudioBufferList>
 ) -> OSStatus {
-    guard let ringBuf = rtRingBuffer else { return noErr }
+    guard let client = rtCaptureClient else { return noErr }
     let ch = Int(rtChannelCount)
     let frames = Int(frameCount)
     let interleavedCount = frames * ch
@@ -50,7 +58,7 @@ private func renderCallback(
     }
     guard let scratch = rtScratchBuffer else { return noErr }
 
-    let read = ringBuf.read(scratch, count: interleavedCount)
+    let read = client.read(scratch, count: interleavedCount)
     if read < interleavedCount {
         scratch.advanced(by: read).initialize(repeating: 0.0, count: interleavedCount - read)
     }
@@ -89,18 +97,21 @@ final class AudioEngine {
     private(set) var outputDeviceUID: String?
     private(set) var error: String?
 
-    private var tapID = AudioObjectID(kAudioObjectUnknown)
-    private var aggregateDeviceID = AudioObjectID(kAudioObjectUnknown)
-    private var procID: AudioDeviceIOProcID?
+    // Capture lives in a separate helper process (see CaptureClient.swift +
+    // Sources/iQualizeCapture/main.swift). This main process owns no CATap,
+    // no aggregate, no IOProc — only the AVAudioEngine output. That separation
+    // is what lets Continuity preempt our render the way it preempts Spotify.
+    // See CONTINUITY.md.
+    private var captureClient: CaptureClient?
     private var engine: AVAudioEngine?
     private var eq: AVAudioUnitEQ?
     private var outputGainEQ: AVAudioUnitEQ?
     private var limiter: AVAudioUnitEffect?
-    private var ringBuffer: AudioRingBuffer?
-    private var tapUUID = UUID()
 
     @ObservationIgnored
     nonisolated(unsafe) private var deviceChangeListenerBlock: AudioObjectPropertyListenerBlock?
+    @ObservationIgnored
+    private var configChangeObserver: NSObjectProtocol?
     private var knownProcessObjectIDs: Set<AudioObjectID> = []
     private var processListPollWorkItem: DispatchWorkItem?
     var onStateChange: (() -> Void)?
@@ -196,137 +207,43 @@ final class AudioEngine {
         error = nil
 
         let outputDeviceID = try getDefaultOutputDeviceID()
-        let outputUID = try getDeviceUID(outputDeviceID)
         outputDeviceName = try getDeviceName(outputDeviceID)
-        outputDeviceUID = outputUID
+        outputDeviceUID = try? getDeviceUID(outputDeviceID)
 
-        // 1. Translate our PID → AudioObjectID so we can exclude ourselves from the tap.
-        //    Without this, the muted tap silences iQualize's own AVAudioEngine output.
-        var translateAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var myPID = ProcessInfo.processInfo.processIdentifier
-        var myProcessObjectID = AudioObjectID(kAudioObjectUnknown)
-        var processObjectSize = UInt32(MemoryLayout<AudioObjectID>.size)
-        AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &translateAddress,
-            UInt32(MemoryLayout<pid_t>.size), &myPID,
-            &processObjectSize, &myProcessObjectID
-        )
+        // 1. Launch the capture helper — it owns the CATap, tap-only aggregate,
+        //    and IOProc in a separate process. We just consume its shared-memory
+        //    ring buffer. This is the architectural fix for AirPods Continuity
+        //    handoff: by not having a CATap in this process, Continuity's
+        //    preemption can release our render from the AirPods (see CONTINUITY.md).
+        let client = CaptureClient()
+        client.onUnexpectedTermination = { [weak self] in
+            guard let self else { return }
+            self.error = "Capture helper terminated unexpectedly."
+            self.stop()
+            self.onStateChange?()
+        }
+        try client.start(helperURL: captureHelperURL())
+        self.captureClient = client
 
-        // 2. Create global tap (muted), excluding iQualize's own process
-        tapUUID = UUID()
-        let excludeProcesses: [AudioObjectID] = myProcessObjectID != kAudioObjectUnknown
-            ? [myProcessObjectID] : []
-        let tapDesc = CATapDescription(stereoGlobalTapButExcludeProcesses: excludeProcesses)
-        tapDesc.uuid = tapUUID
-        tapDesc.muteBehavior = .muted
-        tapDesc.name = "iQualize-EQ"
-
-        tapID = AudioObjectID(kAudioObjectUnknown)
-        try caCheck(
-            AudioHardwareCreateProcessTap(tapDesc, &tapID),
-            "Failed to create process tap"
-        )
-
-        // 3. Read tap format
-        var formatAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioTapPropertyFormat,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var tapFormat = AudioStreamBasicDescription()
-        var formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        try caCheck(
-            AudioObjectGetPropertyData(tapID, &formatAddress, 0, nil, &formatSize, &tapFormat),
-            "Failed to get tap format"
-        )
-        let tapSampleRate = tapFormat.mSampleRate
-        let channels = tapFormat.mChannelsPerFrame
-
-        // Read the output device's native sample rate for comparison
-        var nominalRateAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyNominalSampleRate,
-            mScope: kAudioObjectPropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var deviceSampleRate: Float64 = 0
-        var rateSize = UInt32(MemoryLayout<Float64>.size)
-        AudioObjectGetPropertyData(outputDeviceID, &nominalRateAddress, 0, nil, &rateSize, &deviceSampleRate)
-
-        // Use the output device's native sample rate for AVAudioEngine.
-        // The tap may capture at a different rate (e.g., 48kHz tap vs 44.1kHz Bluetooth).
-        // The aggregate device handles resampling between the tap and the IOProc.
-        let sampleRate = deviceSampleRate > 0 ? deviceSampleRate : tapSampleRate
+        let sampleRate = client.sampleRate
+        let channels = client.channels
         self.outputSampleRate = sampleRate
+        rtCaptureClient = client
+        rtChannelCount = channels
 
         os_log(.default, log: appLog,
-               "tapRate: %{public}.0f  deviceRate: %{public}.0f  using: %{public}.0f  channels: %{public}u  device: %{public}@",
-               tapSampleRate, deviceSampleRate, sampleRate, channels, outputDeviceName as NSString)
-
-        // 4. Create aggregate device with tap and output device in the creation dictionary.
-        //    The tap list MUST be included at creation time — adding it later via
-        //    kAudioAggregateDevicePropertyTapList delivers zero-filled buffers.
-        let aggregateUID = UUID().uuidString
-        let aggregateDesc: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "iQualize-Aggregate",
-            kAudioAggregateDeviceUIDKey: aggregateUID,
-            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
-            kAudioAggregateDeviceIsPrivateKey: true,
-            kAudioAggregateDeviceIsStackedKey: false,
-            kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceSubDeviceListKey: [
-                [kAudioSubDeviceUIDKey: outputUID]
-            ],
-            kAudioAggregateDeviceTapListKey: [
-                [
-                    kAudioSubTapDriftCompensationKey: true,
-                    kAudioSubTapUIDKey: tapUUID.uuidString,
-                ]
-            ],
-        ]
-
-        aggregateDeviceID = AudioObjectID(kAudioObjectUnknown)
-        try caCheck(
-            AudioHardwareCreateAggregateDevice(aggregateDesc as CFDictionary, &aggregateDeviceID),
-            "Failed to create aggregate device"
-        )
-
-        // Wait for device alive
-        var aliveAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceIsAlive,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        for _ in 1...30 {
-            var isAlive: UInt32 = 0
-            var aliveSize = UInt32(MemoryLayout<UInt32>.size)
-            AudioObjectGetPropertyData(aggregateDeviceID, &aliveAddress, 0, nil, &aliveSize, &isAlive)
-            if isAlive != 0 { break }
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-
-        // 5. Set up ring buffer + AVAudioEngine with EQ
-        let bufferSeconds = 0.5
-        let ringBuf = AudioRingBuffer(capacityFrames: Int(sampleRate * bufferSeconds), channels: Int(channels))
-        self.ringBuffer = ringBuf
-        rtRingBuffer = ringBuf
-        rtChannelCount = channels
+               "capture helper sr: %{public}.0f  ch: %{public}u  output: %{public}@",
+               sampleRate, channels, outputDeviceName as NSString)
 
         let avEngine = AVAudioEngine()
 
-        // Explicitly set output to the real hardware device so iQualize's playback
-        // goes directly to hardware, matching the gain staging of the original audio.
-        var outputID = outputDeviceID
-        let outputAU = avEngine.outputNode.audioUnit!
-        AudioUnitSetProperty(
-            outputAU,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global, 0,
-            &outputID, UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
+        // Use AVAudioEngine's default-output behavior — do NOT bind the output AU
+        // to a specific device via kAudioOutputUnitProperty_CurrentDevice. Explicit
+        // binding is part of what made the pre-split single-process render
+        // non-preemptible by the Continuity arbiter. Letting the engine follow the
+        // system default output keeps us in the same route-following path normal
+        // media apps use. We still rebuild on default-device changes via the
+        // existing kAudioHardwarePropertyDefaultOutputDevice listener below.
 
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate,
                                    channels: AVAudioChannelCount(channels))!
@@ -391,6 +308,26 @@ final class AudioEngine {
         try avEngine.start()
         self.engine = avEngine
 
+        // Subscribe to engine configuration changes. AVAudioEngine fires this
+        // when the underlying output device's I/O setup changes — including
+        // when Continuity migrates the output device (e.g. AirPods → iPhone,
+        // and back). Rebuild against the new default output on this signal in
+        // addition to the kAudioHardwarePropertyDefaultOutputDevice listener
+        // below, since the two don't always fire in lockstep.
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: avEngine,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                os_log(.default, log: appLog,
+                       "AVAudioEngineConfigurationChange — restarting")
+                self.restartTap()
+                self.onStateChange?()
+            }
+        }
+
         // 5b. Install spectrum analyzer taps (non-destructive, analysis only)
         // Closures must be @Sendable — they run on the audio render thread, not main.
         // Capture only Sendable values (SpectrumAnalyzer is @unchecked Sendable).
@@ -403,35 +340,6 @@ final class AudioEngine {
         eqNode.installTap(onBus: 0, bufferSize: 2048, format: format) { @Sendable buffer, _ in
             postAnalyzer.process(buffer, sampleRate: capturedSampleRate)
         }
-
-        // 6. Install IOProc on aggregate device — captures tap audio → ring buffer
-        let ioBlock: AudioDeviceIOBlock = { _, inInputData, _, outOutputData, _ in
-            guard let ringBuf = rtRingBuffer else { return }
-
-            let inBufList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inInputData))
-            for i in 0..<inBufList.count {
-                guard let data = inBufList[i].mData else { continue }
-                let sampleCount = Int(inBufList[i].mDataByteSize) / MemoryLayout<Float>.size
-                ringBuf.write(data.assumingMemoryBound(to: Float.self), count: sampleCount)
-            }
-
-            // Zero the output buffers (silence — playback goes through AVAudioEngine)
-            let outBufList = UnsafeMutableAudioBufferListPointer(outOutputData)
-            for i in 0..<outBufList.count {
-                if let data = outBufList[i].mData {
-                    memset(data, 0, Int(outBufList[i].mDataByteSize))
-                }
-            }
-        }
-        try caCheck(
-            AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateDeviceID, nil, ioBlock),
-            "Failed to create IOProc"
-        )
-
-        try caCheck(
-            AudioDeviceStart(aggregateDeviceID, procID),
-            "Failed to start aggregate device"
-        )
 
         isRunning = true
         knownProcessObjectIDs = (try? getProcessObjectList()).map(Set.init) ?? knownProcessObjectIDs
@@ -446,8 +354,12 @@ final class AudioEngine {
         processListPollWorkItem?.cancel()
         processListPollWorkItem = nil
 
-        rtRingBuffer = nil
-        ringBuffer = nil
+        if let configChangeObserver {
+            NotificationCenter.default.removeObserver(configChangeObserver)
+            self.configChangeObserver = nil
+        }
+
+        rtCaptureClient = nil
         rtBiquadChainL = nil
         rtBiquadChainR = nil
 
@@ -456,26 +368,15 @@ final class AudioEngine {
         eq?.removeTap(onBus: 0)
         sourceNode = nil
 
-        AudioDeviceStop(aggregateDeviceID, procID)
         engine?.stop()
         engine = nil
         eq = nil
         limiter = nil
 
-        if let procID {
-            AudioDeviceDestroyIOProcID(aggregateDeviceID, procID)
-            self.procID = nil
-        }
-
-        if aggregateDeviceID != kAudioObjectUnknown {
-            AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
-            aggregateDeviceID = AudioObjectID(kAudioObjectUnknown)
-        }
-
-        if tapID != kAudioObjectUnknown {
-            AudioHardwareDestroyProcessTap(tapID)
-            tapID = AudioObjectID(kAudioObjectUnknown)
-        }
+        // Terminate the capture helper. It cleans up its own CATap, aggregate,
+        // IOProc, and shared memory.
+        captureClient?.stop()
+        captureClient = nil
     }
 
     // MARK: - EQ Control
@@ -485,11 +386,35 @@ final class AudioEngine {
             do {
                 try start()
             } catch {
+                os_log(.error, log: appLog, "start() failed: %{public}@", error.localizedDescription)
                 self.error = error.localizedDescription
+                cleanupPartialStart()
             }
         } else {
             stop()
         }
+    }
+
+    /// Tear down anything that may have been partially initialised by a
+    /// failed start(). Mirrors stop()'s cleanup but doesn't gate on
+    /// isRunning (start() throws before isRunning is set).
+    private func cleanupPartialStart() {
+        if let configChangeObserver {
+            NotificationCenter.default.removeObserver(configChangeObserver)
+            self.configChangeObserver = nil
+        }
+        rtCaptureClient = nil
+        rtBiquadChainL = nil
+        rtBiquadChainR = nil
+        sourceNode?.removeTap(onBus: 0)
+        eq?.removeTap(onBus: 0)
+        sourceNode = nil
+        engine?.stop()
+        engine = nil
+        eq = nil
+        limiter = nil
+        captureClient?.stop()
+        captureClient = nil
     }
 
     private func applyBands(from old: EQPresetData? = nil) {
