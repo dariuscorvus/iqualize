@@ -18,10 +18,9 @@ Just Swift, CoreAudio, and a CATap doing what they should've always done.
 
 ## Why not eqMac
 
-eqMac uses a virtual audio driver.
-iQualize uses a CATap — Apple's native system audio tap introduced in macOS 14.
-No driver to install. No driver to break. No driver to fight with Bluetooth.
-It just works.
+The install process was a hassle. The UI was tiny and fiddly. Half of what I needed was behind a "Pro" paywall. Then my Mac crashed and took the software down with it. That's the actual reason iQualize exists.
+
+eqMac uses a virtual audio driver. iQualize uses a CATap — Apple's native system audio tap introduced in macOS 14. No driver to install. No driver to break. No driver to fight with Bluetooth. It just works.
 
 ## Requirements
 
@@ -54,7 +53,7 @@ open /Applications/iQualize.app
 - Up to 31 bands with editable frequency (20 Hz – 20 kHz), gain, and bandwidth
 - Q / Octave display toggle — switch between Q factor and octave bandwidth globally (Q is the default, octaves for musicians who think in bandwidth)
 - 7 filter types per band: Bell (parametric), Low Shelf, High Shelf, Low Pass, High Pass, Band Pass, and Notch
-- Accurate biquad frequency response curve using Audio EQ Cookbook formulas, rendered as a translucent backdrop behind EQ sliders
+- Biquad frequency response curve using Audio EQ Cookbook formulas, rendered as a translucent backdrop behind EQ sliders
 - Per-band ghost fills, anchor dots with dB labels, and split boost/cut composite fill
 - Axis labels and detailed frequency/dB grid overlay
 - Adjustable max gain range: ±6, ±12, ±18, or ±24 dB — or auto-scale to fit the current curve (up to ±24 dB)
@@ -62,7 +61,7 @@ open /Applications/iQualize.app
 - Output gain (±24 dB) — post-EQ level control, applied before the peak limiter
 - In/Out dB can be shared globally across all presets, or set per-preset — toggle in Settings → General (see Presets and Settings below)
 - Dynamic peak limiter (AUPeakLimiter) — prevents digital clipping at 0 dBFS
-- Smooth, glitch-free parameter updates — only changed values are written to the audio unit
+- Only changed parameter values are written to the audio unit — no audible glitches on slider drags
 
 ### Band Management
 
@@ -146,8 +145,8 @@ Accessible via the gear icon in the EQ window, the Settings item in the menu bar
 - Dual real-time spectrum analyzer: pre-EQ (raw input) and post-EQ (processed output)
 - Independent toggle checkboxes for pre-EQ and post-EQ display
 - 2048-point FFT via Accelerate vDSP with Hann windowing and log-frequency binning
-- Smooth Catmull-Rom spline rendering with peak hold lines
-- Lock-free double-buffered audio-to-UI transfer for glitch-free 60fps updates
+- Catmull-Rom spline rendering with peak hold lines
+- Lock-free double-buffered audio-to-UI transfer, so 60fps UI updates never block on the audio thread
 - Customizable line and fill colors per spectrum (Settings → Display) — defaults to cyan for pre-EQ, orange for post-EQ, both adapting to Light and Dark appearance; reset returns to the dynamic system color
 - Per-spectrum fill toggle (off by default for pre-EQ, on for post-EQ) with its own color, independent from the line color
 - Post-EQ spectrum auto-hides when EQ bypass is active (post-EQ would otherwise just mirror pre-EQ)
@@ -171,9 +170,8 @@ Accessible via the gear icon in the EQ window, the Settings item in the menu bar
 
 ### Command Line
 
-Control a running iQualize instance without touching the menu bar — handy if you don't
-use it at all, and makes iQualize scriptable (Shortcuts, launchd jobs, keyboard-shortcut
-launchers, etc).
+Control a running iQualize instance from the terminal — skip the menu bar entirely, and
+script iQualize with it: Shortcuts, launchd jobs, keyboard-shortcut launchers, etc.
 
 **Setup (one-time):** open iQualize → Settings (Cmd+,) → General → **"Install Command
 Line Tool"**. This prompts for your admin password once and adds `iqualize` to your
@@ -191,7 +189,7 @@ iqualize gain input [<dB>]     # omit the value to read the current one
 iqualize gain output [<dB>]
 ```
 
-If iQualize isn't running, the CLI launches it and retries for a few seconds before
+If iQualize isn't running, the CLI launches it and retries for about 5 seconds before
 giving up. If Terminal still says `command not found` after installing, double-check
 you opened a new window/tab, and that `/usr/local/bin` is on your `PATH` (`echo $PATH`).
 
@@ -227,7 +225,7 @@ The shared-memory ring buffer decouples the helper's real-time IOProc callback f
 
 ## Output Handling
 
-iQualize captures audio at the tap's native sample rate; AVAudioEngine's output node converts it to whatever rate the current output device needs, so playback stays correct across device switches. Bluetooth sends stereo (2ch) only — SBC, AAC, and aptX all max out at 2 channels. If your speaker system supports 5.1 (e.g. Teufel Concept E via USB), the hardware handles channel routing and upmixing (Dolby Pro Logic II etc) on its end.
+iQualize captures audio at the tap's native sample rate; AVAudioEngine's output node converts it to whatever rate the current output device needs, so playback stays correct across device switches. Bluetooth sends stereo (2ch) only — SBC, AAC, and aptX all max out at 2 channels. If your speaker system supports 5.1 — a Teufel Concept E via USB, say — the hardware handles channel routing and upmixing (Dolby Pro Logic II etc) on its end.
 
 ---
 
