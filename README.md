@@ -26,7 +26,7 @@ It just works.
 ## Requirements
 
 - macOS 14.2+ (Core Audio Taps API)
-- Screen & System Audio Recording permission
+- System Audio Recording permission
 
 ## Install
 
@@ -57,7 +57,6 @@ open /Applications/iQualize.app
 - Accurate biquad frequency response curve using Audio EQ Cookbook formulas, rendered as a translucent backdrop behind EQ sliders
 - Per-band ghost fills, anchor dots with dB labels, and split boost/cut composite fill
 - Axis labels and detailed frequency/dB grid overlay
-- Catmull-Rom spline interpolation connecting slider knob positions (dashed gray line)
 - Adjustable max gain range: ±6, ±12, ±18, or ±24 dB — or auto-scale to fit the current curve (up to ±24 dB)
 - Input gain (±24 dB) — pre-EQ level control for proper gain staging
 - Output gain (±24 dB) — post-EQ level control, applied before the peak limiter
@@ -74,7 +73,7 @@ open /Applications/iQualize.app
 
 ### Presets
 
-- Built-in presets: Flat, Bass Boost, Vocal Clarity, Loudness, Treble Boost, Podcast, Techno, Deep House, Hard Techno, Minimal, American Rap, German Rap
+- Built-in presets: Flat, Bass Boost, Vocal Clarity, Loudness, Treble Boost, Podcast, Techno, Deep House, Hard Techno, Minimal, American Rap, German Rap, Luzifer's Void, DEADBEEF, 0xDEADBEEF
 - Create, rename, overwrite, and delete custom presets
 - Built-in presets can be deleted too (except Flat) if you don't want them cluttering your picker — bring a deleted one back anytime from the Preset Browser's iQualize tab
 - Built-in presets auto-fork when edited (non-destructive)
@@ -140,7 +139,7 @@ Accessible via the gear icon in the EQ window, the Settings item in the menu bar
 
 - **Audio**: Peak Limiter toggle, Max Gain range (±6/12/18/24 dB), Auto Scale toggle
 - **Display**: Pre-EQ / Post-EQ spectrum toggles, per-spectrum line color picker, per-spectrum Fill toggle with its own color picker, reset buttons to return to the dynamic system colors, Q / Octave bandwidth display toggle
-- **General**: Theme (Auto / Light / Dark), Hide from Dock toggle, Start at Login toggle, Share In/Out dB across all presets toggle
+- **General**: Theme (Auto / Light / Dark), Hide from Dock toggle, Start at Login toggle, Share In/Out dB across all presets toggle, Install Command Line Tool button
 
 ### Spectrum Analyzer
 
@@ -162,7 +161,9 @@ Accessible via the gear icon in the EQ window, the Settings item in the menu bar
 
 ### System Integration
 
+- AirPods hand off automatically between your Mac and iPhone mid-playback (Apple Continuity), the same as any other app — no need to quit iQualize or manually switch output first
 - Automatic output device switching and reconnection
+- Apps launched after iQualize is already running get picked up into the EQ automatically, no restart needed
 - Sleep/wake handling — pauses on sleep, resumes on wake
 - Window state and all settings persist across launches
 - Codesigned for stable TCC permissions across rebuilds
@@ -198,43 +199,35 @@ you opened a new window/tab, and that `/usr/local/bin` is on your `PATH` (`echo 
 
 > For the long version — why CATap, what fought back, and how the audio graph came together — read the blog post: [Building iQualize - A System-Wide EQ That Doesn't Suck](https://darius.codes/writing/building-iqualize).
 
-iQualize uses Core Audio Taps (CATap), introduced in macOS 14.2, to intercept system audio without a virtual audio device. Virtual devices (like BlackHole or eqMac's driver approach) create a secondary audio path — you lose system volume control, break some DRM-protected audio, and add latency. CATap captures the audio stream directly from the HAL, processes it in-process, and sends it to the output device.
+iQualize uses Core Audio Taps (CATap), introduced in macOS 14.2, to intercept system audio without a virtual audio device. Virtual devices (like BlackHole) create a secondary audio path — you lose system volume control, break some DRM-protected audio, and add latency. CATap captures the audio stream directly from the HAL and processes it before it reaches the output device.
 
-```
-┌─────────────────────────────────────────────────┐
-│  macOS Audio Server                             │
-│                                                 │
-│  App Audio ──┬── Output Device (muted by tap)   │
-│              │                                  │
-│              └── CATap ──► iQualize IOProc      │
-│                            │                    │
-│                            ▼                    │
-│                       Ring Buffer               │
-│                            │                    │
-│                            ▼                    │
-│                   AVAudioSourceNode             │
-│                            │                    │
-│                            ▼                    │
-│                    AVAudioUnitEQ                 │
-│                    (parametric EQ)               │
-│                            │                    │
-│                            ▼                    │
-│                    Output Gain Node              │
-│                    (AVAudioUnitEQ, 0 bands)      │
-│                            │                    │
-│                            ▼                    │
-│                    AUPeakLimiter                  │
-│                            │                    │
-│                            ▼                    │
-│                    Output Device                 │
-└─────────────────────────────────────────────────┘
+The tap and IOProc run in a small helper process (`iQualizeCapture`), separate from the app that renders the processed audio. A process that both holds an active tap and drives the render stream on the same output device gets treated by `coreaudiod` as non-preemptible — which silently blocks AirPods from auto-switching between your Mac and iPhone (Apple Continuity). Splitting tap-ownership from rendering into two processes keeps that path free, so Continuity handoff works the same as it would with any other app.
+
+```mermaid
+flowchart LR
+    subgraph capture["iQualizeCapture (helper process)"]
+        direction TB
+        apps["App Audio"] -->|CATap| aggregate["Tap-only Aggregate Device"]
+        aggregate -->|IOProc| shm[("Shared Memory<br/>Ring Buffer")]
+    end
+
+    subgraph main["iQualize (main process)"]
+        direction TB
+        source["AVAudioSourceNode"] --> eq["AVAudioUnitEQ<br/>(parametric EQ)"]
+        eq --> gain["Output Gain Node"]
+        gain --> limiter["AUPeakLimiter"]
+    end
+
+    shm -->|CaptureClient| source
+    apps -.->|muted by tap| device["Output Device"]
+    limiter -->|AVAudioEngine outputNode| device
 ```
 
-The ring buffer decouples the real-time IOProc callback from AVAudioEngine's pull model. Parameter changes are written atomically — no locks in the audio thread, no glitches on slider drags.
+The shared-memory ring buffer decouples the helper's real-time IOProc callback from the main app's AVAudioEngine pull model — no locks in the audio thread, no glitches on slider drags. If the helper process ever dies unexpectedly, the main app detects it and stops cleanly rather than leaving audio in a broken state.
 
 ## Output Handling
 
-iQualize detects the output device's sample rate and converts internally so the audio plays back correctly regardless of what device you're on. Bluetooth sends stereo (2ch) only — SBC, AAC, and aptX all max out at 2 channels. If your speaker system supports 5.1 (e.g. Teufel Concept E via USB), the hardware handles channel routing and upmixing (Dolby Pro Logic II etc) on its end.
+iQualize captures audio at the tap's native sample rate; AVAudioEngine's output node converts it to whatever rate the current output device needs, so playback stays correct across device switches. Bluetooth sends stereo (2ch) only — SBC, AAC, and aptX all max out at 2 channels. If your speaker system supports 5.1 (e.g. Teufel Concept E via USB), the hardware handles channel routing and upmixing (Dolby Pro Logic II etc) on its end.
 
 ---
 
