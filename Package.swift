@@ -47,6 +47,19 @@ let package = Package(
                 ]),
             ]
         ),
+        // Capture helper — owns the CATap + aggregate IOProc so that the main
+        // iQualize process is not the one Continuity sees as the audio
+        // observer. With the tap-owning process separated from the rendering
+        // process, the main app's AVAudioEngine output is preemptible by
+        // Continuity (just like Spotify). See CONTINUITY.md.
+        .executableTarget(
+            name: "iQualizeCapture",
+            path: "Sources/iQualizeCapture",
+            linkerSettings: [
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("AudioToolbox"),
+            ]
+        ),
         // Requires Xcode (not just Command Line Tools) for XCTest
         // .testTarget(
         //     name: "iQualizeTests",

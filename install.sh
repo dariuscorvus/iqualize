@@ -13,10 +13,25 @@ BIN_PATH="$(swift build -c release --show-bin-path)"
 SRC="$BIN_PATH/iQualize"
 CLI_SRC="$BIN_PATH/iqualize-cli"
 CLI_BIN="$APP/Contents/Resources/bin/iqualize"
+HELPER_SRC="$BIN_PATH/iQualizeCapture"
+HELPER_BIN="$APP/Contents/Helpers/iQualizeCapture"
 
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Helpers"
 
 NEEDS_RESIGN=0
+
+# Install + sign the capture helper FIRST (the main binary's enclosing
+# signature covers the helper, so the helper must already be in place when
+# we sign the main bundle below). It owns the CATap + aggregate IOProc in a
+# separate process — see CONTINUITY.md.
+if [ -f "$HELPER_BIN" ] && cmp -s "$HELPER_SRC" "$HELPER_BIN"; then
+    :
+else
+    cp -f "$HELPER_SRC" "$HELPER_BIN"
+    codesign --force --sign "Apple Development" --entitlements iQualizeCapture.entitlements "$HELPER_BIN" 2>/dev/null && echo "Helper signed"
+    NEEDS_RESIGN=1
+    echo "Helper binary updated"
+fi
 
 # Only replace binary if it actually changed — preserves TCC permissions (cdhash stays the same)
 if [ -f "$BIN" ] && cmp -s "$SRC" "$BIN"; then
