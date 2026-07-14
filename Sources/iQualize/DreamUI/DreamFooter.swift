@@ -110,7 +110,12 @@ struct DreamFooter: View {
                     set: { value.wrappedValue = Float($0); onChange() }
                 ),
                 range: -24...24,
-                step: 0.5
+                step: 0.5,
+                onDoubleClick: {
+                    guard value.wrappedValue != 0 else { return }
+                    value.wrappedValue = 0
+                    onChange()
+                }
             )
             Text(formatSigned(value.wrappedValue))
                 .font(.system(size: 11, design: .monospaced))
@@ -133,11 +138,12 @@ struct DreamFooter: View {
             DreamSlider(
                 value: Binding(
                     get: { Double(vm.balance) },
-                    set: { vm.balance = Float($0); vm.applyBalance() }
+                    set: { setBalance(Float($0)) }
                 ),
                 range: -1...1,
                 step: 0.05,
-                width: 70
+                width: 70,
+                onDoubleClick: { setBalance(0) }
             )
             Text(formatBalance(vm.balance))
                 .font(.system(size: 11, design: .monospaced))
@@ -219,5 +225,10 @@ struct DreamFooter: View {
         if abs(v) < 0.01 { return "0" }
         let pct = Int(round(abs(v) * 100))
         return v < 0 ? "L\(pct)" : "R\(pct)"
+    }
+
+    private func setBalance(_ value: Float) {
+        vm.balance = abs(value) <= 0.05 ? 0 : value
+        vm.applyBalance()
     }
 }
