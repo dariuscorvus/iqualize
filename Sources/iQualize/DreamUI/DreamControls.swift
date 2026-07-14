@@ -168,14 +168,160 @@ struct DreamSlider: View {
     let range: ClosedRange<Double>
     let step: Double
     var width: CGFloat = 90
-
-    @Environment(\.dreamTheme) private var theme
+    var onDoubleClick: (() -> Void)? = nil
 
     var body: some View {
-        Slider(value: $value, in: range, step: step)
-            .controlSize(.mini)
-            .tint(theme.accent)
-            .frame(width: width)
+        NativeDreamSlider(
+            value: $value,
+            range: range,
+            step: step,
+            onDoubleClick: onDoubleClick
+        )
+        .frame(width: width)
+    }
+}
+
+private struct NativeDreamSlider: NSViewRepresentable {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let onDoubleClick: (() -> Void)?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> NSSlider {
+        let slider = AnimatedTrackClickSlider(
+            value: value,
+            minValue: range.lowerBound,
+            maxValue: range.upperBound,
+            target: context.coordinator,
+            action: #selector(Coordinator.valueChanged(_:))
+        )
+        slider.isContinuous = true
+        slider.controlSize = .mini
+
+        if onDoubleClick != nil {
+            let doubleClick = NSClickGestureRecognizer(
+                target: context.coordinator,
+                action: #selector(Coordinator.doubleClicked(_:))
+            )
+            doubleClick.numberOfClicksRequired = 2
+            slider.addGestureRecognizer(doubleClick)
+        }
+
+        return slider
+    }
+
+    func updateNSView(_ slider: NSSlider, context: Context) {
+        context.coordinator.parent = self
+        slider.minValue = range.lowerBound
+        slider.maxValue = range.upperBound
+        if slider.doubleValue != value {
+            slider.doubleValue = value
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var parent: NativeDreamSlider
+
+        init(parent: NativeDreamSlider) {
+            self.parent = parent
+        }
+
+        @objc func valueChanged(_ slider: NSSlider) {
+            let offset = slider.doubleValue - parent.range.lowerBound
+            let stepped = parent.range.lowerBound + (offset / parent.step).rounded() * parent.step
+            let value = min(max(stepped, parent.range.lowerBound), parent.range.upperBound)
+            slider.doubleValue = value
+            parent.value = value
+        }
+
+        @objc func doubleClicked(_ recognizer: NSClickGestureRecognizer) {
+            parent.onDoubleClick?()
+            (recognizer.view as? NSSlider)?.doubleValue = parent.value
+        }
+    }
+}
+
+private final class AnimatedTrackClickSlider: NSSlider {
+    private static let trackClickDuration: TimeInterval = 0.1
+    private static let frameInterval: TimeInterval = 1.0 / 120.0
+
+    private var animationTimer: Timer?
+    private var animationStartTime: TimeInterval = 0
+    private var animationStartValue: Double = 0
+    private var animationTargetValue: Double = 0
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1,
+           let sliderCell = cell as? NSSliderCell,
+           !sliderCell.isVertical {
+            let location = convert(event.locationInWindow, from: nil)
+            let knobRect = sliderCell.knobRect(flipped: isFlipped)
+
+            if !knobRect.contains(location) {
+                let trackRect = sliderCell.trackRect
+                let halfKnob = sliderCell.knobThickness / 2
+                let usableMinX = trackRect.minX + halfKnob
+                let usableMaxX = trackRect.maxX - halfKnob
+                let usableWidth = usableMaxX - usableMinX
+
+                if usableWidth > 0 {
+                    let fraction = min(max((location.x - usableMinX) / usableWidth, 0), 1)
+                    animateTrackClick(to: minValue + fraction * (maxValue - minValue))
+                    return
+                }
+            }
+        }
+
+        cancelTrackClickAnimation()
+        super.mouseDown(with: event)
+    }
+
+    private func animateTrackClick(to targetValue: Double) {
+        cancelTrackClickAnimation()
+
+        animationStartTime = ProcessInfo.processInfo.systemUptime
+        animationStartValue = doubleValue
+        animationTargetValue = targetValue
+
+        let timer = Timer(
+            timeInterval: Self.frameInterval,
+            target: self,
+            selector: #selector(advanceTrackClickAnimation(_:)),
+            userInfo: nil,
+            repeats: true
+        )
+        animationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        advanceTrackClickAnimation(timer)
+    }
+
+    @objc private func advanceTrackClickAnimation(_ timer: Timer) {
+        guard timer === animationTimer else {
+            timer.invalidate()
+            return
+        }
+
+        let elapsed = ProcessInfo.processInfo.systemUptime - animationStartTime
+        let progress = min(elapsed / Self.trackClickDuration, 1)
+        let easedProgress = progress * progress * (3 - 2 * progress)
+
+        doubleValue = animationStartValue
+            + (animationTargetValue - animationStartValue) * easedProgress
+        sendAction(action, to: target)
+
+        if progress >= 1 {
+            cancelTrackClickAnimation()
+        }
+    }
+
+    private func cancelTrackClickAnimation() {
+        animationTimer?.invalidate()
+        animationTimer = nil
     }
 }
 

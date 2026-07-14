@@ -2,6 +2,12 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.41.1] - 2026-07-14
+
+### Fixed
+- Stereo balance once again snaps to center near zero and resets to center on double-click. Both behaviors were lost in the DreamUI rewrite (#99)
+- In, Out, and Balance now use the same native macOS slider control. Track clicks animate to the target value over `100 ms`, and all three reset to center on double-click
+
 ## [0.41.0] - 2026-07-13
 
 ### Added
