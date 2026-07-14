@@ -201,6 +201,7 @@ private struct NativeDreamSlider: NSViewRepresentable {
         )
         slider.isContinuous = true
         slider.controlSize = .mini
+        slider.scrollStep = step
 
         if onDoubleClick != nil {
             let doubleClick = NSClickGestureRecognizer(
@@ -254,6 +255,8 @@ private final class AnimatedTrackClickSlider: NSSlider {
     private var animationStartTime: TimeInterval = 0
     private var animationStartValue: Double = 0
     private var animationTargetValue: Double = 0
+    private var scrollRemainder: Double = 0
+    var scrollStep: Double = 1
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 1,
@@ -279,6 +282,34 @@ private final class AnimatedTrackClickSlider: NSSlider {
 
         cancelTrackClickAnimation()
         super.mouseDown(with: event)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        let delta = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : -event.scrollingDeltaX
+        guard delta != 0 else { return }
+
+        cancelTrackClickAnimation()
+
+        let direction = delta > 0 ? 1.0 : -1.0
+        let precision = event.hasPreciseScrollingDeltas ? abs(delta) : 1.0
+        let stepScale = event.modifierFlags.contains(.shift) ? 0.5 : 1.0
+
+        scrollRemainder += direction * precision
+
+        let wholeSteps = Int(floor(scrollRemainder.magnitude))
+        guard wholeSteps > 0 else { return }
+
+        scrollRemainder -= Double(wholeSteps) * (scrollRemainder > 0 ? 1 : -1)
+
+        let proposedValue = doubleValue + Double(wholeSteps) * scrollStep * stepScale * direction
+        let newValue = min(max(proposedValue, minValue), maxValue)
+        guard newValue != doubleValue else {
+            scrollRemainder = 0
+            return
+        }
+
+        doubleValue = newValue
+        sendAction(action, to: target)
     }
 
     private func animateTrackClick(to targetValue: Double) {
