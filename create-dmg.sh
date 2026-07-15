@@ -65,5 +65,11 @@ hdiutil convert "$TMP_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG_NAME"
 rm -rf "$STAGING" "$TMP_DMG"
 
 echo ""
+echo "=== Verifying DMG ==="
+# Gate the build on a valid signature so a "damaged" DMG (issue #115) can never
+# be produced. set -e aborts create-dmg.sh if this fails.
+bash "$(dirname "$0")/verify-dmg.sh" "$DMG_NAME"
+
+echo ""
 echo "=== Done: $DMG_NAME ==="
 ls -lh "$DMG_NAME"
