@@ -25,7 +25,7 @@ Only do this when the user explicitly asks to cut/tag/publish a release — not 
 
 1. Bump the version and update `CHANGELOG.md` (should already be done in the merge PR, per above — backfill on `main` first if it wasn't).
 2. Tag the merge commit on `main`: `git tag vX.Y.Z <commit>` (lightweight tag, matching every existing tag in this repo) then `git push origin vX.Y.Z`.
-3. Build the installer: `bash create-dmg.sh` — builds, signs, and packages `iQualize-X.Y.Z.dmg` in the repo root.
+3. Build the installer: `bash create-dmg.sh` — builds, signs, packages, and verifies `iQualize-X.Y.Z.dmg` in the repo root. It runs `verify-dmg.sh` at the end and aborts if the app inside has a broken/invalid signature (the state macOS reports as "damaged" — issue #115). A `PreToolUse` hook (`.claude/settings.json`) also blocks `gh release create` on a DMG that fails the same check. The app is ad-hoc signed, not notarized, so downloads still need `xattr -dr com.apple.quarantine`.
 4. Publish the GitHub Release with the DMG attached: `gh release create vX.Y.Z iQualize-X.Y.Z.dmg --title "vX.Y.Z — <short description>" --notes "..."`. Look at a recent release (`gh release view vX.Y.Z-1`) for the notes format — highlights list, a link to the CHANGELOG diff, and the Gatekeeper `xattr -dr com.apple.quarantine` install instructions.
 5. Publishing a Release (step 4) is a distinct public action from tagging (step 2) — confirm with the user separately before running `gh release create`, even if they already approved the tag.
 
