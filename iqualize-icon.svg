@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b2740"></stop>
+      <stop offset="0.55" stop-color="#0b111e"></stop>
+      <stop offset="1" stop-color="#060910"></stop>
+    </linearGradient>
+    <linearGradient id="curve" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#60a5fa"></stop>
+      <stop offset="0.5" stop-color="#3b82f6"></stop>
+      <stop offset="1" stop-color="#22d3ee"></stop>
+    </linearGradient>
+    <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6" stop-opacity="0.45"></stop>
+      <stop offset="1" stop-color="#3b82f6" stop-opacity="0"></stop>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.55">
+      <stop offset="0" stop-color="#3b82f6" stop-opacity="0.35"></stop>
+      <stop offset="1" stop-color="#3b82f6" stop-opacity="0"></stop>
+    </radialGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"></stop>
+      <stop offset="0.18" stop-color="#ffffff" stop-opacity="0.04"></stop>
+      <stop offset="0.4" stop-color="#ffffff" stop-opacity="0"></stop>
+    </linearGradient>
+    <clipPath id="sq"><rect width="512" height="512" rx="114.5"></rect></clipPath>
+  </defs>
+  <g clip-path="url(#sq)">
+    <rect width="512" height="512" fill="url(#bg)"></rect>
+    <rect width="512" height="512" fill="url(#glow)"></rect>
+    <g stroke="#ffffff" stroke-opacity="0.05" stroke-width="2">
+      <line x1="0" y1="256" x2="512" y2="256"></line>
+      <line x1="128" y1="64" x2="128" y2="448"></line>
+      <line x1="256" y1="64" x2="256" y2="448"></line>
+      <line x1="384" y1="64" x2="384" y2="448"></line>
+    </g>
+    <path d="M0 336 L40 336 C140 336 160 168 256 168 C352 168 372 336 472 336 L512 336 L512 512 L0 512 Z" fill="url(#fill)"></path>
+    <path d="M40 336 C140 336 160 168 256 168 C352 168 372 336 472 336" fill="none" stroke="#3b82f6" stroke-width="44" stroke-linecap="round" opacity="0.25"></path>
+    <path d="M40 336 C140 336 160 168 256 168 C352 168 372 336 472 336" fill="none" stroke="url(#curve)" stroke-width="20" stroke-linecap="round"></path>
+    <circle cx="256" cy="168" r="30" fill="#ffffff"></circle>
+    <circle cx="256" cy="168" r="30" fill="none" stroke="#3b82f6" stroke-opacity="0.5" stroke-width="8"></circle>
+    <rect width="512" height="512" fill="url(#sheen)"></rect>
+  </g>
+</svg>
