@@ -388,13 +388,23 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         let alert = NSAlert()
         alert.messageText = "iQualize"
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        alert.informativeText = "System-wide audio equalizer for macOS.\nVersion \(version)"
+        alert.informativeText = """
+        System-wide audio equalizer for macOS.
+        Version \(version)
+
+        Headphone EQ profiles come from the OPRA project, licensed CC BY-SA 4.0.
+        """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "View on GitHub")
-        if alert.runModal() == .alertSecondButtonReturn,
-           let url = URL(string: "https://github.com/DariusCorvus/iqualize") {
-            NSWorkspace.shared.open(url)
+        alert.addButton(withTitle: "OPRA Project")
+        switch alert.runModal() {
+        case .alertSecondButtonReturn:
+            NSWorkspace.shared.open(URL(string: "https://github.com/DariusCorvus/iqualize")!)
+        case .alertThirdButtonReturn:
+            NSWorkspace.shared.open(OPRAAttribution.projectURL)
+        default:
+            break
         }
     }
 

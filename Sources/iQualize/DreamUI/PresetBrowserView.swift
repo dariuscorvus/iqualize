@@ -55,6 +55,10 @@ struct PresetBrowserView: View {
                 Divider()
                 sidebarList
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if catalog == .opra {
+                    Divider()
+                    OPRAAttributionView()
+                }
                 Divider()
                 Picker("Catalog", selection: $catalog) {
                     ForEach(Catalog.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -70,6 +74,10 @@ struct PresetBrowserView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await load() }
+        // Clear the search when switching catalogs — a term left over from OPRA
+        // otherwise filters the iQualize tab and hides deleted built-ins that are
+        // actually there, ready to restore (#115).
+        .onChange(of: catalog) { searchText = "" }
     }
 
     // MARK: - Search
