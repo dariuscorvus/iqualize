@@ -22,18 +22,18 @@ final class PresetBrowserWindowController: NSWindowController, NSWindowDelegate 
         super.init(window: window)
         window.delegate = self
 
-        let host = NSHostingView(rootView: PresetBrowserView(presetStore: presetStore, onImportOPRA: onImportOPRA))
-        host.translatesAutoresizingMaskIntoConstraints = false
-
-        let container = NSView()
-        container.addSubview(host)
-        NSLayoutConstraint.activate([
-            host.topAnchor.constraint(equalTo: container.topAnchor),
-            host.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            host.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-        ])
-        window.contentView = container
+        // Host the SwiftUI content as the window's `contentViewController` (via
+        // `NSHostingController`) rather than a bare `NSHostingView` subview. This gives the
+        // `NavigationSplitView` a real window scene, so its sidebar `.searchable` field pins
+        // to a native, opaque toolbar area instead of floating over the scrolling headphone
+        // list (issue #108). `sceneBridgingOptions` lets SwiftUI own the window's toolbar and
+        // title; `.unified` merges that toolbar into the titlebar.
+        let hosting = NSHostingController(
+            rootView: PresetBrowserView(presetStore: presetStore, onImportOPRA: onImportOPRA)
+        )
+        hosting.sceneBridgingOptions = [.title, .toolbars]
+        window.contentViewController = hosting
+        window.toolbarStyle = .unified
     }
 
     @available(*, unavailable)
