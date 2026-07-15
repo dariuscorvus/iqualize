@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./icon.png" width="128" alt="iQualize app icon">
+</p>
+
 # iQualize
 
 > macOS doesn't have a system-wide parametric EQ.
