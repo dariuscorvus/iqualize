@@ -15,7 +15,7 @@ final class PresetBrowserWindowController: NSWindowController, NSWindowDelegate 
             backing: .buffered, defer: true
         )
         window.title = "Preset Browser"
-        window.minSize = NSSize(width: 480, height: 360)
+        window.minSize = NSSize(width: 520, height: 400)
         window.center()
         window.isReleasedWhenClosed = false
 

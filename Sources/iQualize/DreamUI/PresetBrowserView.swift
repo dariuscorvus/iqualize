@@ -1,7 +1,15 @@
 import SwiftUI
 
-/// Top-level Preset Browser container: a catalog picker switching between OPRA's community
-/// database and iQualize's own built-in presets the user has hidden from their picker.
+/// Top-level Preset Browser: a `NavigationSplitView` whose sidebar stacks a search field on
+/// top, the scrolling catalog list in the middle, and the OPRA/iQualize catalog picker pinned
+/// at the bottom. The picker switches between OPRA's community database and iQualize's own
+/// built-in presets the user has hidden from their picker. The detail pane shows the selected
+/// OPRA product's community EQ curves.
+///
+/// The search field is a plain `VStack` sibling above the `List`, not `.searchable`. A
+/// `.searchable(placement: .sidebar)` field renders as a transparent overlay inside the
+/// scrolling list and the rows draw straight through it (issue #108); a fixed sibling can't be
+/// overlapped.
 @available(macOS 14.2, *)
 struct PresetBrowserView: View {
     let presetStore: PresetStore
@@ -14,31 +22,7 @@ struct PresetBrowserView: View {
 
     @State private var catalog: Catalog = .opra
 
-    var body: some View {
-        VStack(spacing: 0) {
-            Picker("Catalog", selection: $catalog) {
-                ForEach(Catalog.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(8)
-            Divider()
-            switch catalog {
-            case .opra:
-                OPRACatalogBrowserView(onImport: onImportOPRA)
-            case .iqualize:
-                IQualizeCatalogView(presetStore: presetStore)
-            }
-        }
-    }
-}
-
-/// Search-and-import UI for OPRA's community headphone EQ database. Sidebar lists matching
-/// products; selecting one shows its available community EQ curves in the detail pane.
-@available(macOS 14.2, *)
-struct OPRACatalogBrowserView: View {
-    let onImport: (OPRAProductEntry, OPRACurveEntry) -> Void
-
+    // OPRA catalog state.
     @State private var products: [OPRAProductEntry] = []
     @State private var searchText = ""
     @State private var selectedProductID: String?
@@ -53,18 +37,78 @@ struct OPRACatalogBrowserView: View {
         }
     }
 
+    private var filteredHiddenPresets: [EQPresetData] {
+        let hidden = presetStore.hiddenBuiltInPresets
+        guard !searchText.isEmpty else { return hidden }
+        return hidden.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
     var body: some View {
-        NavigationSplitView {
-            sidebar
-                .navigationSplitViewColumnWidth(min: 240, ideal: 280)
-        } detail: {
+        // A fixed two-pane HStack rather than a NavigationSplitView. The split view's divider
+        // stays user-draggable even with the toggle removed and `columnVisibility` pinned, so
+        // the sidebar could be dragged shut. A fixed-width sidebar has no draggable divider and
+        // can't collapse. Selection is driven by `selectedProductID`, so we don't need the
+        // split view's navigation behavior.
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                searchField
+                Divider()
+                sidebarList
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
+                Picker("Catalog", selection: $catalog) {
+                    ForEach(Catalog.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(8)
+            }
+            .frame(width: 280)
+            Divider()
             detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await load() }
     }
 
+    // MARK: - Search
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search", text: $searchText)
+                .textFieldStyle(.plain)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(.background)
+    }
+
+    // MARK: - Sidebar list
+
     @ViewBuilder
-    private var sidebar: some View {
+    private var sidebarList: some View {
+        switch catalog {
+        case .opra:
+            opraSidebar
+        case .iqualize:
+            iqualizeSidebar
+        }
+    }
+
+    @ViewBuilder
+    private var opraSidebar: some View {
         switch loadState {
         case .loading:
             ProgressView("Loading OPRA database…")
@@ -83,7 +127,29 @@ struct OPRACatalogBrowserView: View {
                 productRow(product).tag(product.id)
             }
             .listStyle(.sidebar)
-            .searchable(text: $searchText, placement: .sidebar, prompt: "Search headphones…")
+        }
+    }
+
+    @ViewBuilder
+    private var iqualizeSidebar: some View {
+        let hidden = filteredHiddenPresets
+        if hidden.isEmpty {
+            Text(searchText.isEmpty
+                 ? "All built-in presets are already in your list"
+                 : "No matching presets")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List(hidden) { preset in
+                HStack {
+                    Text(preset.name)
+                    Spacer()
+                    Button("Restore") { presetStore.restoreBuiltInPreset(id: preset.id) }
+                }
+            }
+            .listStyle(.sidebar)
         }
     }
 
@@ -119,28 +185,48 @@ struct OPRACatalogBrowserView: View {
         .frame(width: 32, height: 24)
     }
 
+    // MARK: - Detail
+
     @ViewBuilder
     private var detail: some View {
-        if let selectedProductID, let product = products.first(where: { $0.id == selectedProductID }) {
-            List(product.curves) { curve in
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(curve.author).font(.body)
-                        if let details = curve.details {
-                            Text(details).font(.caption).foregroundStyle(.secondary)
+        switch catalog {
+        case .opra:
+            if let selectedProductID, let product = products.first(where: { $0.id == selectedProductID }) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("\(product.vendorName) \(product.productName)")
+                        .font(.headline)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                    Divider()
+                    List(product.curves) { curve in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(curve.author).font(.body)
+                                if let details = curve.details {
+                                    Text(details).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Button("Import") { onImportOPRA(product, curve) }
                         }
                     }
-                    Spacer()
-                    Button("Import") { onImport(product, curve) }
                 }
+            } else {
+                placeholder("Select a headphone to see available EQ profiles")
             }
-            .navigationTitle("\(product.vendorName) \(product.productName)")
-        } else {
-            Text("Select a headphone to see available EQ profiles")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .iqualize:
+            placeholder("Restore a built-in preset to add it back to your picker")
         }
     }
+
+    private func placeholder(_ text: String) -> some View {
+        Text(text)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Loading
 
     private func load() async {
         loadState = .loading
@@ -149,31 +235,6 @@ struct OPRACatalogBrowserView: View {
             loadState = .loaded
         } catch {
             loadState = .failed(error.localizedDescription)
-        }
-    }
-}
-
-/// Lists built-in presets the user has deleted from their picker, with a one-click way to
-/// bring each back. Unlike an OPRA import, restoring doesn't switch the active EQ curve —
-/// it just makes the preset selectable again from the normal preset picker.
-@available(macOS 14.2, *)
-struct IQualizeCatalogView: View {
-    let presetStore: PresetStore
-
-    var body: some View {
-        let hidden = presetStore.hiddenBuiltInPresets
-        if hidden.isEmpty {
-            Text("All built-in presets are already in your list")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            List(hidden) { preset in
-                HStack {
-                    Text(preset.name)
-                    Spacer()
-                    Button("Restore") { presetStore.restoreBuiltInPreset(id: preset.id) }
-                }
-            }
         }
     }
 }
