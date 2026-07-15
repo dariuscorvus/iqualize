@@ -167,6 +167,8 @@ struct DreamSlider: View {
     @Binding var value: Double
     let range: ClosedRange<Double>
     let step: Double
+    /// Step used while scrolling with Shift held. `0` disables fine scrolling.
+    var fineStep: Double = 0
     var width: CGFloat = 90
     var onDoubleClick: (() -> Void)? = nil
 
@@ -175,6 +177,7 @@ struct DreamSlider: View {
             value: $value,
             range: range,
             step: step,
+            fineStep: fineStep,
             onDoubleClick: onDoubleClick
         )
         .frame(width: width)
@@ -185,6 +188,7 @@ private struct NativeDreamSlider: NSViewRepresentable {
     @Binding var value: Double
     let range: ClosedRange<Double>
     let step: Double
+    let fineStep: Double
     let onDoubleClick: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
@@ -202,6 +206,12 @@ private struct NativeDreamSlider: NSViewRepresentable {
         slider.isContinuous = true
         slider.controlSize = .mini
         slider.scrollStep = step
+        slider.fineScrollStep = fineStep
+        // Scroll writes the value straight to the binding, bypassing the
+        // step-snapping in `valueChanged` so fine (Shift) increments survive.
+        slider.onScroll = { [weak coordinator = context.coordinator] newValue in
+            coordinator?.parent.value = newValue
+        }
 
         if onDoubleClick != nil {
             let doubleClick = NSClickGestureRecognizer(
@@ -257,6 +267,8 @@ private final class AnimatedTrackClickSlider: NSSlider {
     private var animationTargetValue: Double = 0
     private var scrollRemainder: Double = 0
     var scrollStep: Double = 1
+    var fineScrollStep: Double = 0
+    var onScroll: ((Double) -> Void)?
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 1,
@@ -292,7 +304,8 @@ private final class AnimatedTrackClickSlider: NSSlider {
 
         let direction = delta > 0 ? 1.0 : -1.0
         let precision = event.hasPreciseScrollingDeltas ? abs(delta) : 1.0
-        let stepScale = event.modifierFlags.contains(.shift) ? 0.5 : 1.0
+        let fine = fineScrollStep > 0 && event.modifierFlags.contains(.shift)
+        let stepSize = fine ? fineScrollStep : scrollStep
 
         scrollRemainder += direction * precision
 
@@ -301,7 +314,7 @@ private final class AnimatedTrackClickSlider: NSSlider {
 
         scrollRemainder -= Double(wholeSteps) * (scrollRemainder > 0 ? 1 : -1)
 
-        let proposedValue = doubleValue + Double(wholeSteps) * scrollStep * stepScale * direction
+        let proposedValue = doubleValue + Double(wholeSteps) * stepSize * direction
         let newValue = min(max(proposedValue, minValue), maxValue)
         guard newValue != doubleValue else {
             scrollRemainder = 0
@@ -309,7 +322,7 @@ private final class AnimatedTrackClickSlider: NSSlider {
         }
 
         doubleValue = newValue
-        sendAction(action, to: target)
+        onScroll?(newValue)
     }
 
     private func animateTrackClick(to targetValue: Double) {

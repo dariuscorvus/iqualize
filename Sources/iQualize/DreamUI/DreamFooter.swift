@@ -111,6 +111,7 @@ struct DreamFooter: View {
                 ),
                 range: -24...24,
                 step: 0.5,
+                fineStep: 0.1,
                 onDoubleClick: {
                     guard value.wrappedValue != 0 else { return }
                     value.wrappedValue = 0
@@ -142,6 +143,7 @@ struct DreamFooter: View {
                 ),
                 range: -1...1,
                 step: 0.05,
+                fineStep: 0.01,
                 width: 70,
                 onDoubleClick: { setBalance(0) }
             )
