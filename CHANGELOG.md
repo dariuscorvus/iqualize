@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.43.0] - 2026-07-15
+
+### Added
+- Scroll over the In, Out, and Balance sliders to nudge them by one step. Precise trackpad scrolls accumulate sub-step deltas so slow gestures still register, and holding Shift scrolls in fine increments (0.1 dB for In/Out, 0.01 for Balance)
+
 ## [0.42.1] - 2026-07-15
 
 ### Fixed
