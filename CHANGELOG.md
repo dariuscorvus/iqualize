@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.44.0] - 2026-07-15
+
+### Changed
+- New app icon — the "Signal Glow" design, a blue EQ curve with a node handle over a dark grid, replacing the ember/ice bars. `generate-icon.py` now rasterizes the `iqualize-icon.svg` vector master instead of drawing the old icon procedurally
+
 ## [0.43.0] - 2026-07-15
 
 ### Added
