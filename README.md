@@ -37,11 +37,13 @@ eqMac uses a virtual audio driver. iQualize uses a CATap — Apple's native syst
 
 Grab the latest `.dmg` from [Releases](https://github.com/DariusCorvus/iqualize/releases), open it, and drag iQualize to Applications.
 
-iQualize is unsigned. Apple charges $99/year for a developer certificate. If macOS blocks the app, run:
+iQualize is unsigned — Apple charges $99/year for a developer certificate and the app isn't notarized. macOS puts a quarantine flag on anything downloaded from the web, and for an unsigned app that shows up as **"iQualize is damaged and can't be opened"** (macOS Sequoia/Tahoe) or a generic "unidentified developer" block. It isn't actually damaged. After dragging it to Applications, clear the flag once:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/iQualize.app
 ```
+
+Then open it normally. If the `.dmg` itself won't mount, clear the flag on the download first: `xattr -c ~/Downloads/iQualize-*.dmg`.
 
 ### Build from source
 
@@ -230,6 +232,10 @@ The shared-memory ring buffer decouples the helper's real-time IOProc callback f
 ## Output Handling
 
 iQualize captures audio at the tap's native sample rate; AVAudioEngine's output node converts it to whatever rate the current output device needs, so playback stays correct across device switches. Bluetooth sends stereo (2ch) only — SBC, AAC, and aptX all max out at 2 channels. If your speaker system supports 5.1 — a Teufel Concept E via USB, say — the hardware handles channel routing and upmixing (Dolby Pro Logic II etc) on its end.
+
+## Credits
+
+The Preset Browser's headphone and IEM EQ profiles come from the [OPRA project](https://github.com/opra-project/OPRA) — Open Profiles for Revealing Audio, an open, community-maintained directory of product information and EQ compensation curves. OPRA's data is licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/); each imported profile credits its original author in the browser.
 
 ---
 

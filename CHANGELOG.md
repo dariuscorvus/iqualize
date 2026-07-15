@@ -2,6 +2,16 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.45.0] - 2026-07-15
+
+### Added
+- Credited the OPRA project throughout, as required by the OPRA database's CC BY-SA 4.0 license: the Preset Browser's OPRA tab now shows the OPRA logo, a short description, and a link to the repository, and the About dialog names OPRA as the source of the headphone EQ profiles. Each imported profile already credits its author
+
+### Fixed
+- The app icon and README icon shipped with opaque white corners instead of transparent ones. `generate-icon.py` rasterized the SVG with QuickLook, which can't emit an alpha channel, so the rounded corners were filled white. It now renders the SVG on white and on black and recovers the true alpha from the pair (#115)
+- Distributed DMGs shipped with a broken code signature. `install.sh` signed with an "Apple Development" certificate that isn't installed on the build machine, so the call failed silently and the app was left with an inconsistent seal — which macOS reports as "damaged." It now falls back to a valid ad-hoc signature and signs the bundle after every resource is in place. Unnotarized downloads still need the quarantine flag stripped; the README now spells that out (#115)
+- Switching the Preset Browser from the OPRA tab to the iQualize tab kept the OPRA search term, which filtered the built-in list and hid deleted presets so they looked missing. The search now clears when you switch catalogs (#115)
+
 ## [0.44.0] - 2026-07-15
 
 ### Changed

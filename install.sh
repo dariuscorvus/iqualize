@@ -4,6 +4,19 @@ set -e
 
 cd "$(dirname "$0")"
 
+# Pick a signing identity: a real Apple Development cert if one is installed,
+# otherwise ad-hoc ("-"). Ad-hoc is fine for local dev — TCC keys on the cdhash,
+# which stays stable across rebuilds when the binary is unchanged. It is NOT
+# accepted by Gatekeeper on quarantined downloads (macOS reports "damaged"), so
+# distributed DMGs still need the quarantine xattr stripped — see README.
+# Previously this always passed "Apple Development"; when that cert is absent the
+# codesign call failed silently and the app shipped with a broken signature.
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "Apple Development"; then
+    SIGN_ID="Apple Development"
+else
+    SIGN_ID="-"
+fi
+
 echo "Building iQualize..."
 swift build -c release 2>&1 | tail -5
 
@@ -28,7 +41,7 @@ if [ -f "$HELPER_BIN" ] && cmp -s "$HELPER_SRC" "$HELPER_BIN"; then
     :
 else
     cp -f "$HELPER_SRC" "$HELPER_BIN"
-    codesign --force --sign "Apple Development" --entitlements iQualizeCapture.entitlements "$HELPER_BIN" 2>/dev/null && echo "Helper signed"
+    codesign --force --sign "$SIGN_ID" --entitlements iQualizeCapture.entitlements "$HELPER_BIN" && echo "Helper signed ($SIGN_ID)"
     NEEDS_RESIGN=1
     echo "Helper binary updated"
 fi
@@ -67,8 +80,9 @@ else
 fi
 
 if [ "$NEEDS_RESIGN" = "1" ]; then
-    SIGN_ID="Apple Development"
-    codesign --force --sign "$SIGN_ID" --entitlements iQualize.entitlements "$APP" 2>/dev/null && echo "Signed with: $SIGN_ID"
+    # Sign the whole bundle after every resource is in place so the sealed
+    # CodeResources is consistent (a partial/stale seal reads as "damaged").
+    codesign --force --sign "$SIGN_ID" --entitlements iQualize.entitlements "$APP" && echo "Signed with: $SIGN_ID"
 fi
 
 # Strip provenance xattr to prevent macOS security policy launch blocks
