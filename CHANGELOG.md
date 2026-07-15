@@ -2,6 +2,14 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.42.0] - 2026-07-15
+
+### Changed
+- Reorganized the Preset Browser's sidebar: search field pinned at the top, the scrolling catalog list in the middle, and the OPRA/iQualize catalog picker moved to the bottom of the sidebar. Search now filters whichever catalog is active. The sidebar is a fixed-width column that can't be collapsed or dragged shut
+
+### Fixed
+- In the Preset Browser's OPRA tab, the headphone list scrolled straight through the sidebar search box, overwriting it (#108). The search field is now a fixed sibling above the list instead of a transparent overlay inside it, so the rows can no longer draw through it
+
 ## [0.41.1] - 2026-07-14
 
 ### Fixed
