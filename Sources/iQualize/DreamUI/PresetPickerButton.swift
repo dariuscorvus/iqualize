@@ -46,7 +46,7 @@ struct PresetPickerButton: NSViewRepresentable {
                 onToggleFavorite: { [weak self] id in self?.toggleFavorite(id) ?? false }
             )
             PresetMenuBuilder.addPresetSections(
-                to: menu, builtIn: EQPresetData.builtInPresets, custom: vm.presetStore.customPresets,
+                to: menu, builtIn: vm.presetStore.allPresets.filter(\.isBuiltIn), custom: vm.presetStore.customPresets,
                 favoriteIDs: Set(vm.presetStore.favoritePresetIDs), activePresetID: vm.activePresetID,
                 onSelect: { [weak self] id in self?.select(id); menu.cancelTracking() },
                 onToggleFavorite: { [weak self] id in self?.toggleFavorite(id) ?? false }

@@ -2,10 +2,23 @@
 
 All notable changes to iQualize will be documented in this file.
 
-## [0.42.0] - 2026-07-14
+## [0.43.0] - 2026-07-15
 
 ### Added
 - Scroll over the In, Out, and Balance sliders to nudge them by one step. Precise trackpad scrolls accumulate sub-step deltas so slow gestures still register, and holding Shift scrolls in fine increments (0.1 dB for In/Out, 0.01 for Balance)
+
+## [0.42.1] - 2026-07-15
+
+### Fixed
+- Deleting a built-in preset left it in the in-app picker, where it still showed but could no longer be selected (#109). The in-app picker built its built-in section from the raw preset list while the menu bar filtered out hidden ones, so the two disagreed. The picker now uses the same hidden-filtered list — deleted built-ins disappear from it and are restored from the Preset Browser's iQualize tab, matching the menu bar
+
+## [0.42.0] - 2026-07-15
+
+### Changed
+- Reorganized the Preset Browser's sidebar: search field pinned at the top, the scrolling catalog list in the middle, and the OPRA/iQualize catalog picker moved to the bottom of the sidebar. Search now filters whichever catalog is active. The sidebar is a fixed-width column that can't be collapsed or dragged shut
+
+### Fixed
+- In the Preset Browser's OPRA tab, the headphone list scrolled straight through the sidebar search box, overwriting it (#108). The search field is now a fixed sibling above the list instead of a transparent overlay inside it, so the rows can no longer draw through it
 
 ## [0.41.1] - 2026-07-14
 
