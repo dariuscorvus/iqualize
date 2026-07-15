@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.42.1] - 2026-07-15
+
+### Fixed
+- Deleting a built-in preset left it in the in-app picker, where it still showed but could no longer be selected (#109). The in-app picker built its built-in section from the raw preset list while the menu bar filtered out hidden ones, so the two disagreed. The picker now uses the same hidden-filtered list — deleted built-ins disappear from it and are restored from the Preset Browser's iQualize tab, matching the menu bar
+
 ## [0.42.0] - 2026-07-15
 
 ### Changed
