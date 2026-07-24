@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.45.1] - 2026-07-24
+
+### Fixed
+- Bypass wasn't a true passthrough: the In gain, Out gain, and Balance stages kept running while bypassed, so "bypassed" audio was still colored by whatever those controls were set to. Bypass now neutralizes In/Out to 0 dB and Balance to center in the signal path while bypassed, and restores their audible effect on un-bypass — the stored/displayed control values never change (#118)
+
 ## [0.45.0] - 2026-07-15
 
 ### Added
