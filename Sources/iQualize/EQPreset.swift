@@ -37,6 +37,8 @@ struct iQualizeState: Codable {
     var dreamTheme: String?
     /// Snap newly-dragged band frequencies to musical semitones.
     var snapToSemitone: Bool
+    /// EQ canvas zoom range, e.g. "full" | "subBass" | "bass" | "mid" | "presence" | "treble". Nil = full.
+    var zoomRange: String?
 
     static let defaultState = iQualizeState(
         isEnabled: false,
@@ -60,12 +62,13 @@ struct iQualizeState: Codable {
         preEqFillEnabled: false,
         postEqFillEnabled: true,
         dreamTheme: nil,
-        snapToSemitone: false
+        snapToSemitone: false,
+        zoomRange: nil
     )
 
     private static let key = "com.iqualize.state"
 
-    init(isEnabled: Bool, selectedPresetID: UUID, peakLimiter: Bool, windowOpen: Bool = false, maxGainDB: Float = 12, bypassed: Bool = false, autoScale: Bool = true, preEqSpectrumEnabled: Bool = false, postEqSpectrumEnabled: Bool = false, hideFromDock: Bool = false, startAtLogin: Bool = false, balance: Float = 0.0, splitChannelEnabled: Bool = false, activeChannel: String? = nil, inputGainDB: Float = 0.0, outputGainDB: Float = 0.0, linkGainGlobally: Bool = false, showBandwidthAsQ: Bool = true, preEqLineColorHex: String? = nil, postEqLineColorHex: String? = nil, preEqFillColorHex: String? = nil, postEqFillColorHex: String? = nil, preEqFillEnabled: Bool = false, postEqFillEnabled: Bool = true, dreamTheme: String? = nil, snapToSemitone: Bool = false) {
+    init(isEnabled: Bool, selectedPresetID: UUID, peakLimiter: Bool, windowOpen: Bool = false, maxGainDB: Float = 12, bypassed: Bool = false, autoScale: Bool = true, preEqSpectrumEnabled: Bool = false, postEqSpectrumEnabled: Bool = false, hideFromDock: Bool = false, startAtLogin: Bool = false, balance: Float = 0.0, splitChannelEnabled: Bool = false, activeChannel: String? = nil, inputGainDB: Float = 0.0, outputGainDB: Float = 0.0, linkGainGlobally: Bool = false, showBandwidthAsQ: Bool = true, preEqLineColorHex: String? = nil, postEqLineColorHex: String? = nil, preEqFillColorHex: String? = nil, postEqFillColorHex: String? = nil, preEqFillEnabled: Bool = false, postEqFillEnabled: Bool = true, dreamTheme: String? = nil, snapToSemitone: Bool = false, zoomRange: String? = nil) {
         self.isEnabled = isEnabled
         self.selectedPresetID = selectedPresetID
         self.peakLimiter = peakLimiter
@@ -92,6 +95,7 @@ struct iQualizeState: Codable {
         self.postEqFillEnabled = postEqFillEnabled
         self.dreamTheme = dreamTheme
         self.snapToSemitone = snapToSemitone
+        self.zoomRange = zoomRange
     }
 
     init(from decoder: Decoder) throws {
@@ -122,6 +126,7 @@ struct iQualizeState: Codable {
         postEqFillEnabled = (try? container.decode(Bool.self, forKey: .postEqFillEnabled)) ?? true
         dreamTheme = try? container.decode(String.self, forKey: .dreamTheme)
         snapToSemitone = (try? container.decode(Bool.self, forKey: .snapToSemitone)) ?? false
+        zoomRange = try? container.decode(String.self, forKey: .zoomRange)
     }
 
     static func load() -> iQualizeState {
