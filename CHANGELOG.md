@@ -2,6 +2,13 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.47.0] - 2026-07-24
+
+### Fixed
+- Editing the per-preset Input/Output dB gain on a built-in preset forked and immediately saved it to the custom-preset store, so an unsaved fork showed up in the picker's Custom section before the user ever hit Save — and the title's unsaved-changes dot never lit up for it either. Band edits already deferred saving until Save; gain edits now follow the same rule (#100)
+- Pinning a preset to an output device while it had unsaved changes could pin an id that isn't in the preset store, silently dangling the pin the moment the fork was discarded. The pin button is now disabled while there are unsaved changes (#100)
+- Switching presets or starting a new preset while there were unsaved changes discarded them with no warning; now prompts Save / Cancel / Don't Save first. Deleting the active preset never asked for confirmation at all, saved or not; it now always asks before hiding a built-in or removing a custom preset (#100)
+
 ## [0.46.1] - 2026-07-24
 
 ### Fixed

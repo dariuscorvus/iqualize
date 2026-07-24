@@ -82,11 +82,13 @@ final class DreamViewModel {
     }
 
     /// Unpins if the active preset is already the one pinned here, otherwise pins it.
+    /// No-ops while there are unsaved changes — pinning an unsaved fork would point at an
+    /// id that isn't in `PresetStore`, silently dangling the pin.
     func toggleDevicePin() {
         guard let uid = audioEngine.outputDeviceUID else { return }
         if isCurrentDevicePinnedToActivePreset {
             presetStore.unpinPreset(fromDeviceUID: uid)
-        } else {
+        } else if !isModified {
             presetStore.pinPreset(audioEngine.activePreset.id, toDeviceUID: uid)
         }
     }
@@ -226,7 +228,10 @@ final class DreamViewModel {
     /// different identity and would otherwise leave a phantom dirty dot.
     private func contentMatchesSaved(_ preset: EQPresetData) -> Bool {
         guard let saved = savedSnapshot else { return false }
-        return preset.bands == saved.bands && preset.rightBands == saved.rightBands
+        return preset.bands == saved.bands
+            && preset.rightBands == saved.rightBands
+            && preset.inputGainDB == saved.inputGainDB
+            && preset.outputGainDB == saved.outputGainDB
     }
 
     // MARK: - Mutation helpers
@@ -514,6 +519,10 @@ final class DreamViewModel {
     // MARK: - Mutations: preset
 
     func loadPreset(id: UUID) {
+        confirmDiscardIfNeeded { [weak self] in self?.performLoadPreset(id: id) }
+    }
+
+    private func performLoadPreset(id: UUID) {
         guard let preset = presetStore.preset(for: id) else { return }
         let oldPreset = audioEngine.activePreset
         audioEngine.activePreset = preset
@@ -544,6 +553,10 @@ final class DreamViewModel {
     }
 
     func newPreset() {
+        confirmDiscardIfNeeded { [weak self] in self?.performNewPreset() }
+    }
+
+    private func performNewPreset() {
         let existing = presetStore.allPresets.map { $0.name }
         var n = 1
         while existing.contains("Custom EQ \(n)") { n += 1 }
@@ -574,6 +587,9 @@ final class DreamViewModel {
         presetStore.saveCustomPreset(preset)
         savedSnapshot = preset
         isModified = false
+        var s = iQualizeState.load()
+        s.selectedPresetID = preset.id
+        s.save()
     }
 
     func saveAsPreset(name: String?) {
@@ -592,7 +608,9 @@ final class DreamViewModel {
             name: resolvedName,
             bands: bands,
             rightBands: rightBands,
-            isBuiltIn: false
+            isBuiltIn: false,
+            inputGainDB: audioEngine.activePreset.inputGainDB,
+            outputGainDB: audioEngine.activePreset.outputGainDB
         )
         presetStore.saveCustomPreset(newPreset)
         let old = audioEngine.activePreset
@@ -601,9 +619,31 @@ final class DreamViewModel {
         isModified = false
         syncFromAudioEngine()
         registerUndo(actionName: "Save As", oldPreset: old)
+        var s = iQualizeState.load()
+        s.selectedPresetID = newPreset.id
+        s.save()
     }
 
+    /// Confirms before deleting — a built-in is hidden (recoverable from the Preset Browser),
+    /// a custom preset is removed outright. Doesn't route through `confirmDiscardIfNeeded`:
+    /// offering to save unsaved edits first would be pointless when the whole preset is about
+    /// to be removed.
     func deleteCurrentPreset() {
+        guard activePresetID != EQPresetData.flat.id else { return }
+        let alert = NSAlert()
+        alert.messageText = "Delete \"\(presetName)\"?"
+        alert.informativeText = isBuiltIn
+            ? "This hides it from the picker. You can bring it back later from the Preset Browser."
+            : isModified
+                ? "This removes it and discards your unsaved changes. This can't be undone."
+                : "This can't be undone."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        performDeleteCurrentPreset()
+    }
+
+    private func performDeleteCurrentPreset() {
         guard activePresetID != EQPresetData.flat.id else { return }
         if isBuiltIn {
             presetStore.hideBuiltInPreset(id: activePresetID)
@@ -627,6 +667,34 @@ final class DreamViewModel {
     func redo() { undoManager?.redo() }
 
     // MARK: - Native dialogs
+
+    /// If there are unsaved changes, asks Save / Cancel / Don't Save before running `then`.
+    /// Proceeds straight to `then` when there's nothing to lose. "Save" reuses the same
+    /// built-in-redirects-to-Save-As rule as the toolbar's Save button; if that dialog gets
+    /// cancelled, the whole action is treated as cancelled too.
+    func confirmDiscardIfNeeded(then: @escaping () -> Void) {
+        guard isModified else { then(); return }
+        let alert = NSAlert()
+        alert.messageText = "Save changes to \"\(presetName)\"?"
+        alert.informativeText = "Your changes will be lost if you don't save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Don't Save")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            if isBuiltIn {
+                presentSaveAsDialog()
+                if isModified { return } // the Save As name prompt was itself cancelled
+            } else {
+                savePreset()
+            }
+            then()
+        case .alertThirdButtonReturn:
+            then()
+        default:
+            return
+        }
+    }
 
     /// Show a native save-as dialog (NSAlert with a text field accessory) and persist the result
     /// as a new custom preset.
@@ -864,15 +932,7 @@ final class DreamViewModel {
             audioEngine.inputGainDB = inGainDB
             persistFooterToggles()
         } else {
-            forkIfBuiltIn()
-            var preset = audioEngine.activePreset
-            preset.inputGainDB = inGainDB
-            audioEngine.activePreset = preset
-            presetStore.saveCustomPreset(preset)
-            savedSnapshot = preset
-            var s = iQualizeState.load()
-            s.selectedPresetID = preset.id
-            s.save()
+            mutateGain("Adjust Input Gain") { $0.inputGainDB = inGainDB }
         }
     }
 
@@ -881,16 +941,23 @@ final class DreamViewModel {
             audioEngine.outputGainDB = outGainDB
             persistFooterToggles()
         } else {
-            forkIfBuiltIn()
-            var preset = audioEngine.activePreset
-            preset.outputGainDB = outGainDB
-            audioEngine.activePreset = preset
-            presetStore.saveCustomPreset(preset)
-            savedSnapshot = preset
-            var s = iQualizeState.load()
-            s.selectedPresetID = preset.id
-            s.save()
+            mutateGain("Adjust Output Gain") { $0.outputGainDB = outGainDB }
         }
+    }
+
+    /// Per-preset gain edit: forks a built-in in-memory only (matches `mutate()`'s band-edit
+    /// behavior) — no `PresetStore.saveCustomPreset` call, so the fork stays out of the picker
+    /// and out of persisted state until an explicit Save.
+    private func mutateGain(_ actionName: String, _ apply: (inout EQPresetData) -> Void) {
+        let oldPreset = audioEngine.activePreset
+        forkIfBuiltIn()
+        var preset = audioEngine.activePreset
+        apply(&preset)
+        audioEngine.activePreset = preset
+        let wasModified = isModified
+        isModified = !contentMatchesSaved(preset)
+        if wasModified != isModified { onTitleShouldUpdate?() }
+        registerUndo(actionName: actionName, oldPreset: oldPreset)
     }
 
     func applyBalance() {

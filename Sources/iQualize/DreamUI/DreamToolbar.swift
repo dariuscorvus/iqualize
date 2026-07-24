@@ -97,9 +97,12 @@ struct DreamToolbar: View {
                 .font(.system(size: 12, weight: .medium))
         }
         .controlSize(.regular)
+        .disabled(vm.isModified && !vm.isCurrentDevicePinnedToActivePreset)
         .help(vm.isCurrentDevicePinnedToActivePreset
               ? "Unpin from \(vm.outputDeviceName)"
-              : "Pin to \(vm.outputDeviceName)")
+              : vm.isModified
+                ? "Save this preset before pinning it"
+                : "Pin to \(vm.outputDeviceName)")
 
         Button(action: { vm.onOpenSettings?() }) {
             Image(systemName: "gearshape").font(.system(size: 12, weight: .medium))
