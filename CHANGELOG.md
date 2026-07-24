@@ -2,6 +2,12 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.48.0] - 2026-07-25
+
+### Added
+- Zoom control for the EQ graph: Full / Sub / Bass / Mid / Pres / Treb segmented toggle floating on top of the graph. Zooming rescales the graph, gridlines, and axis labels to a frequency sub-range (Sub-bass 20-60Hz, Bass 60-250Hz, Mid 250Hz-2kHz, Presence 2-4kHz, Treble 4-20kHz) for finer control when working on one part of the spectrum. Dragging a band knob is clamped to the current zoom window, and the canvas-edge "Add Band" buttons/"Add Suggested Band" add within the visible range while zoomed. Everything else (keyboard nudges, the readout grid's numeric fields, `updateBand`'s own frequency clamp) stays full-range regardless of zoom
+- Fixed a rendering bug the zoom feature surfaced: the graph's frequency-to-x-position mapping clamped any frequency below the visible range onto the exact left-edge pixel instead of letting it map off-canvas like the high-frequency side already did, so the real-time spectrum trace showed a flat plateau on the left edge whenever the graph was zoomed into a sub-range
+
 ## [0.47.0] - 2026-07-24
 
 ### Fixed

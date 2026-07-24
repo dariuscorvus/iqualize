@@ -36,6 +36,7 @@ final class DreamViewModel {
     var altPressed: Bool = false
     var bandwidthDisplay: BandwidthDisplay = .oct
     var snapToSemitone: Bool = false
+    var zoomRange: ZoomRange = .full
     var theme: DreamThemePreference = .auto
     var editing: EditingTarget?
 
@@ -120,6 +121,7 @@ final class DreamViewModel {
         let s = iQualizeState.load()
         if let raw = s.dreamTheme, let t = DreamThemePreference(rawValue: raw) { theme = t }
         snapToSemitone = s.snapToSemitone
+        zoomRange = s.zoomRange.flatMap(ZoomRange.init(rawValue:)) ?? .full
         bandwidthDisplay = s.showBandwidthAsQ ? .q : .oct
         peakLimiter = s.peakLimiter
         bypass = s.bypassed
@@ -147,6 +149,12 @@ final class DreamViewModel {
     func persistSnap() {
         var s = iQualizeState.load()
         s.snapToSemitone = snapToSemitone
+        s.save()
+    }
+
+    func persistZoomRange() {
+        var s = iQualizeState.load()
+        s.zoomRange = zoomRange.rawValue
         s.save()
     }
 
@@ -464,38 +472,54 @@ final class DreamViewModel {
 
     enum AddMode { case left, right, suggest }
 
+    /// Bands added from the canvas edges land within the current zoom window — the buttons sit
+    /// at the edges of what's currently visible, so a click there should add something in view.
     func addBand(_ mode: AddMode) {
         mutate("Add Band") {
+            let range = self.zoomRange.bounds
             if self.bands.isEmpty {
-                self.bands.append(EQBand(frequency: 1000, gain: 0, bandwidth: 1.0))
+                self.bands.append(EQBand(frequency: Self.zoomMidpoint(range), gain: 0, bandwidth: 1.0))
                 return
             }
             let sorted = self.bands.sorted { $0.frequency < $1.frequency }
             switch mode {
             case .left:
                 let template = sorted.first!
-                let f = max(20, template.frequency / 1.5)
+                let f = Self.clampToZoom(template.frequency / 1.5, range)
                 self.bands.append(EQBand(frequency: f, gain: template.gain, bandwidth: template.bandwidth, filterType: template.filterType))
             case .right:
                 let template = sorted.last!
-                let f = min(20000, template.frequency * 1.5)
+                let f = Self.clampToZoom(template.frequency * 1.5, range)
                 self.bands.append(EQBand(frequency: f, gain: template.gain, bandwidth: template.bandwidth, filterType: template.filterType))
             case .suggest:
-                let f = self.findLargestGap(in: sorted)
+                let f = self.findLargestGap(in: sorted, range: range)
                 self.bands.append(EQBand(frequency: f, gain: 0, bandwidth: 1.0))
             }
         }
     }
 
-    private func findLargestGap(in sorted: [EQBand]) -> Float {
-        guard sorted.count >= 2 else { return 1000 }
+    private static func clampToZoom(_ f: Float, _ range: ClosedRange<Double>) -> Float {
+        max(Float(range.lowerBound), min(Float(range.upperBound), f))
+    }
+
+    private static func zoomMidpoint(_ range: ClosedRange<Double>) -> Float {
+        Float((range.lowerBound * range.upperBound).squareRoot())
+    }
+
+    /// Widest gap between bands that fall within `range` — bands outside the current zoom
+    /// window aren't candidates, so "Add Suggested Band" only ever lands somewhere visible.
+    private func findLargestGap(in sorted: [EQBand], range: ClosedRange<Double>) -> Float {
+        let bounds = Float(range.lowerBound)...Float(range.upperBound)
+        let within = sorted.filter { bounds.contains($0.frequency) }
+        let fallback = Self.zoomMidpoint(range)
+        guard within.count >= 2 else { return fallback }
         var bestRatio: Float = 0
-        var bestF: Float = 1000
-        for i in 0..<(sorted.count - 1) {
-            let ratio = sorted[i + 1].frequency / sorted[i].frequency
+        var bestF: Float = fallback
+        for i in 0..<(within.count - 1) {
+            let ratio = within[i + 1].frequency / within[i].frequency
             if ratio > bestRatio {
                 bestRatio = ratio
-                bestF = sqrt(sorted[i].frequency * sorted[i + 1].frequency)
+                bestF = sqrt(within[i].frequency * within[i + 1].frequency)
             }
         }
         return bestF
@@ -1002,6 +1026,35 @@ enum BandwidthDisplay: String, Sendable {
 
 enum ChannelMode: String, Sendable {
     case linked, l, r
+}
+
+/// Restricts the EQ canvas's visible/editable frequency window, for working precisely on one
+/// part of the spectrum. Purely a view preference — never persisted with a preset, doesn't
+/// affect `updateBand`'s clamp, keyboard nudges, or the readout grid, all of which stay full-range.
+enum ZoomRange: String, CaseIterable, Sendable {
+    case full, subBass, bass, mid, presence, treble
+
+    var bounds: ClosedRange<Double> {
+        switch self {
+        case .full: return 20...20000
+        case .subBass: return 20...60
+        case .bass: return 60...250
+        case .mid: return 250...2000
+        case .presence: return 2000...4000
+        case .treble: return 4000...20000
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .full: return "Full"
+        case .subBass: return "Sub"
+        case .bass: return "Bass"
+        case .mid: return "Mid"
+        case .presence: return "Pres"
+        case .treble: return "Treb"
+        }
+    }
 }
 
 struct EditingTarget: Equatable {

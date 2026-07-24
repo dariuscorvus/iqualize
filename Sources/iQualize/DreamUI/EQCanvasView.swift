@@ -32,11 +32,38 @@ struct EQCanvasView: View {
 
                 addButton(.left)
                 addButton(.right)
+
+                zoomControl
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 8)
             }
             .background(theme.bgCanvas)
             .clipped()
         }
         .frame(maxWidth: .infinity, minHeight: 380, idealHeight: 380, maxHeight: .infinity)
+    }
+
+    // MARK: - Zoom control
+
+    @ViewBuilder
+    private var zoomControl: some View {
+        DreamSegment(
+            selection: Binding(
+                get: { vm.zoomRange },
+                set: { vm.zoomRange = $0; vm.persistZoomRange() }
+            ),
+            options: ZoomRange.allCases.map { ($0, $0.label) }
+        )
+        .help("Zoom the graph into a frequency range")
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(theme.bgControl.opacity(0.9))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(theme.line, lineWidth: 1)
+        )
     }
 
     // MARK: - +Add buttons
@@ -116,41 +143,36 @@ struct EQCanvasView: View {
             )
         }
 
-        // Frequency grid
-        let decades: [Double] = [10, 100, 1000, 10000]
-        let minors: [Double] = [
-            20,30,40,50,60,70,80,90,
-            200,300,400,500,600,700,800,900,
-            2000,3000,4000,5000,6000,7000,8000,9000,
-            11000,12000,13000,14000,15000,16000,17000,18000,19000
-        ]
-        for f in minors where f >= 20 && f <= 20000 {
+        // Frequency grid — the full-spectrum view keeps its hand-tuned tick arrays; zoomed
+        // sub-ranges generate the same decade/minor/labeled tiers programmatically, since a
+        // fixed array can't cover an arbitrary window.
+        let (minors, decades, labeled) = gridTicks(for: domain)
+        for f in minors where f >= domain.lowerBound && f <= domain.upperBound {
             let x = freqToX(f, W: W)
             var p = Path(); p.move(to: .init(x: x, y: 0)); p.addLine(to: .init(x: x, y: H))
             ctx.stroke(p, with: .color(ink(0.035)), lineWidth: 0.5)
             var t = Path(); t.move(to: .init(x: x, y: H - 1)); t.addLine(to: .init(x: x, y: H - 4))
             ctx.stroke(t, with: .color(ink(0.12)), lineWidth: 1)
         }
-        for f in decades where f >= 20 && f <= 20000 {
+        for f in decades where f >= domain.lowerBound && f <= domain.upperBound {
             let x = freqToX(f, W: W)
             var p = Path(); p.move(to: .init(x: x, y: 0)); p.addLine(to: .init(x: x, y: H))
             ctx.stroke(p, with: .color(ink(0.10)), lineWidth: 1)
             var t = Path(); t.move(to: .init(x: x, y: H - 1)); t.addLine(to: .init(x: x, y: H - 7))
             ctx.stroke(t, with: .color(ink(0.28)), lineWidth: 1)
         }
-        // Frequency labels — unit suffixed only on the extremes (20 Hz, 20 kHz). Middle labels stay
-        // numeric to avoid a row of repetitive "Hz"/"kHz" tokens.
-        let labeled: [Double] = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
-        for f in labeled where f >= 20 && f <= 20000 {
+        // Frequency labels — unit suffixed only on the visible extremes (e.g. "20 Hz"/"20 kHz"
+        // for the full view, or the current zoom's own bounds). Middle labels stay numeric to
+        // avoid a row of repetitive "Hz"/"kHz" tokens.
+        for f in labeled where f >= domain.lowerBound && f <= domain.upperBound {
             let x = freqToX(f, W: W)
             let base = f >= 1000 ? "\(Int(f/1000))k" : "\(Int(f))"
-            let label: String
-            if f == 20 { label = "20 Hz" }
-            else if f == 20000 { label = "20 kHz" }
-            else { label = base }
+            let isLowEdge = f == domain.lowerBound
+            let isHighEdge = f == domain.upperBound
+            let label = edgeLabel(for: f) ?? base
             let txt = Text(label).font(.system(size: 10)).foregroundStyle(ink(0.42))
-            let anchor: UnitPoint = (f == 20) ? .leading : (f == 20000) ? .trailing : .center
-            let px = (f == 20) ? x + 4 : (f == 20000) ? x - 4 : x
+            let anchor: UnitPoint = isLowEdge ? .leading : isHighEdge ? .trailing : .center
+            let px = isLowEdge ? x + 4 : isHighEdge ? x - 4 : x
             ctx.draw(txt, at: CGPoint(x: px, y: H - 10), anchor: anchor)
         }
 
@@ -158,7 +180,7 @@ struct EQCanvasView: View {
         if vm.snapToSemitone || vm.altPressed {
             for n in -60...72 {
                 let f = 440.0 * pow(2.0, Double(n) / 12.0)
-                if f < 20 || f > 20000 { continue }
+                if f < domain.lowerBound || f > domain.upperBound { continue }
                 let x = freqToX(f, W: W)
                 var p = Path(); p.addRect(.init(x: x, y: H - 14, width: 1, height: 8))
                 ctx.fill(p, with: .color(Color(rgba: 0x60a5fa, a: 0.18)))
@@ -480,7 +502,7 @@ struct EQCanvasView: View {
             if vm.snapToSemitone || vm.altPressed {
                 f = snapToNearest(f)
             }
-            f = max(20, min(20000, f))
+            f = max(domain.lowerBound, min(domain.upperBound, f))
             vm.updateBand(id: drag.bandID, frequency: Float(f), gain: Float(g))
         case .bandwidth:
             let dxFrac = (p.x - drag.startX) / W
@@ -599,16 +621,74 @@ struct EQCanvasView: View {
     private static let chartLeftPad: CGFloat = 14
     private static let chartRightPad: CGFloat = 14
 
+    /// The canvas's current frequency domain — the full spectrum, or a zoomed-in sub-range.
+    /// Every position/hit-test call site funnels through `freqToX`/`xToFreq`, so this one
+    /// property is the only thing that needs to change for the whole canvas to "zoom."
+    private var domain: ClosedRange<Double> { vm.zoomRange.bounds }
+
+    /// Maps a frequency to canvas x. Frequencies outside the current zoom domain map outside
+    /// [0, W] rather than clamping onto an edge — e.g. an FFT spectrum bin or a band below the
+    /// zoomed-in lower bound should scroll off-canvas, not collapse every sub-range value onto
+    /// the same pixel (which produced a flat plateau at the left edge of the spectrum trace
+    /// whenever the graph was zoomed to a sub-range). `max(0.0001, f)` only guards log10 against
+    /// non-positive input; it isn't a clamp to the domain.
     private func freqToX(_ f: Double, W: CGFloat) -> CGFloat {
         let chartW = max(1, W - Self.chartLeftPad - Self.chartRightPad)
-        let t = (log10(max(20.0, f)) - log10(20.0)) / (log10(20000.0) - log10(20.0))
+        let lo = domain.lowerBound, hi = domain.upperBound
+        let t = (log10(max(0.0001, f)) - log10(lo)) / (log10(hi) - log10(lo))
         return Self.chartLeftPad + chartW * CGFloat(t)
     }
 
     private func xToFreq(_ x: CGFloat, W: CGFloat) -> Double {
         let chartW = max(1, W - Self.chartLeftPad - Self.chartRightPad)
+        let lo = domain.lowerBound, hi = domain.upperBound
         let t = max(0, min(1, (x - Self.chartLeftPad) / chartW))
-        return pow(10.0, log10(20.0) + Double(t) * (log10(20000.0) - log10(20.0)))
+        return pow(10.0, log10(lo) + Double(t) * (log10(hi) - log10(lo)))
+    }
+
+    /// Frequency-grid ticks for `range`, split into faint "minor" lines, bold "decade" lines
+    /// (exact powers of ten), and a subset that gets a text label. The full-spectrum view keeps
+    /// its original hand-tuned arrays (including the denser 11-19 kHz fill in the top decade);
+    /// zoomed sub-ranges generate the same 2-9×decade minor / 1-2-5×decade major pattern
+    /// programmatically, since a fixed array can't span an arbitrary window.
+    private func gridTicks(for range: ClosedRange<Double>) -> (minors: [Double], decades: [Double], labeled: [Double]) {
+        guard vm.zoomRange != .full else {
+            return (
+                minors: [
+                    20, 30, 40, 50, 60, 70, 80, 90,
+                    200, 300, 400, 500, 600, 700, 800, 900,
+                    2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000,
+                    11000, 12000, 13000, 14000, 15000, 16000, 17000, 18000, 19000
+                ],
+                decades: [10, 100, 1000, 10000],
+                labeled: [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
+            )
+        }
+        let lo = range.lowerBound, hi = range.upperBound
+        var minors: [Double] = []
+        var decades: [Double] = []
+        var labeled: Set<Double> = [lo, hi]
+        var decade = pow(10, floor(log10(lo)))
+        while decade <= hi {
+            if decade >= lo && decade <= hi { decades.append(decade); labeled.insert(decade) }
+            for m in [2.0, 5.0] where decade * m >= lo && decade * m <= hi { labeled.insert(decade * m) }
+            for m in stride(from: 2.0, through: 9.0, by: 1.0) where decade * m >= lo && decade * m <= hi {
+                minors.append(decade * m)
+            }
+            decade *= 10
+        }
+        return (minors, decades, labeled.sorted())
+    }
+
+    /// Full unit-suffixed text ("60 Hz", "4 kHz") for the two edges of the currently-visible
+    /// range — the full view keeps its original literal "20 Hz"/"20 kHz" text; other zoom levels
+    /// derive it from whatever the current bounds actually are.
+    private func edgeLabel(for f: Double) -> String? {
+        guard f == domain.lowerBound || f == domain.upperBound else { return nil }
+        if vm.zoomRange == .full {
+            return f == domain.lowerBound ? "20 Hz" : "20 kHz"
+        }
+        return formatHz(Float(f))
     }
 
     /// Pixels of margin above the +max grid line — the dB label sits with its bottom 2 pt above
