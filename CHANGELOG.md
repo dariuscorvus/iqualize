@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.45.1] - 2026-07-24
+
+### Fixed
+- The "About iQualize" item in the app menu (next to the Apple icon) opened macOS's standard About panel, which lacked the GitHub link and OPRA credit that the menu bar icon's About dialog already had. Both now open the same custom About dialog (#119)
+
 ## [0.45.0] - 2026-07-15
 
 ### Added
