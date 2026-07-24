@@ -144,14 +144,16 @@ final class AudioEngine {
     }
 
     var bypassed: Bool = false {
-        didSet { applyBands() }
+        didSet {
+            applyBands()
+            updateInputGain()
+            updateBalance()
+            updateOutputGain()
+        }
     }
 
     var balance: Float = 0.0 {
-        didSet {
-            rtBalanceLeft = balance <= 0 ? 1.0 : 1.0 - balance
-            rtBalanceRight = balance >= 0 ? 1.0 : 1.0 + balance
-        }
+        didSet { updateBalance() }
     }
 
     var splitChannelActive: Bool = false {
@@ -162,13 +164,32 @@ final class AudioEngine {
     }
 
     var inputGainDB: Float = 0.0 {
-        didSet {
-            rtInputGain = powf(10, inputGainDB / 20)
-        }
+        didSet { updateInputGain() }
     }
 
     var outputGainDB: Float = 0.0 {
-        didSet { outputGainEQ?.globalGain = outputGainDB }
+        didSet { updateOutputGain() }
+    }
+
+    /// Bypass is a true passthrough: In, Out, and Balance are neutralized while
+    /// bypassed and restored on un-bypass, without touching the stored/displayed
+    /// control values (see #118).
+    private func updateInputGain() {
+        rtInputGain = bypassed ? 1.0 : powf(10, inputGainDB / 20)
+    }
+
+    private func updateBalance() {
+        if bypassed {
+            rtBalanceLeft = 1.0
+            rtBalanceRight = 1.0
+        } else {
+            rtBalanceLeft = balance <= 0 ? 1.0 : 1.0 - balance
+            rtBalanceRight = balance >= 0 ? 1.0 : 1.0 + balance
+        }
+    }
+
+    private func updateOutputGain() {
+        outputGainEQ?.globalGain = bypassed ? 0 : outputGainDB
     }
 
     var maxGainDB: Float = 12
@@ -293,8 +314,8 @@ final class AudioEngine {
         self.limiter = limiterNode
 
         let outputGainNode = AVAudioUnitEQ(numberOfBands: 0)
-        outputGainNode.globalGain = outputGainDB
         self.outputGainEQ = outputGainNode
+        updateOutputGain()
 
         avEngine.attach(sourceNode)
         avEngine.attach(eqNode)
