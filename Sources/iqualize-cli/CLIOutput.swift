@@ -28,12 +28,19 @@ func requireOK(_ response: CLIResponse) -> CLIResponse {
     return response
 }
 
+func formatBalance(_ value: Float) -> String {
+    if abs(value) < 0.01 { return "center" }
+    let pct = Int(round(abs(value) * 100))
+    return value < 0 ? "L\(pct)" : "R\(pct)"
+}
+
 func formatStatus(_ status: CLIStatusPayload) -> String {
     let mode = status.gainIsGlobal ? "shared" : "per-preset"
     return """
     Bypass: \(status.bypassed ? "on" : "off")
     Preset: \(status.activePresetName)
     Gain: \(String(format: "input %+.1f dB, output %+.1f dB", status.inputGainDB, status.outputGainDB)) (\(mode))
+    Balance: \(formatBalance(status.balance))
     Output device: \(status.outputDeviceName)
     """
 }

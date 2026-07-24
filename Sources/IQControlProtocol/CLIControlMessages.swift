@@ -27,6 +27,7 @@ public enum CLICommand {
     public static let toggleBypass = "toggleBypass"
     public static let setInputGain = "setInputGain"
     public static let setOutputGain = "setOutputGain"
+    public static let setBalance = "setBalance"
 }
 
 // MARK: - Response
@@ -59,16 +60,18 @@ public struct CLIStatusPayload: Codable, Sendable {
     public var activePresetName: String
     public var inputGainDB: Float
     public var outputGainDB: Float
+    public var balance: Float
     public var gainIsGlobal: Bool
     public var outputDeviceName: String
     public var isRunning: Bool
 
-    public init(bypassed: Bool, activePresetID: UUID, activePresetName: String, inputGainDB: Float, outputGainDB: Float, gainIsGlobal: Bool, outputDeviceName: String, isRunning: Bool) {
+    public init(bypassed: Bool, activePresetID: UUID, activePresetName: String, inputGainDB: Float, outputGainDB: Float, balance: Float, gainIsGlobal: Bool, outputDeviceName: String, isRunning: Bool) {
         self.bypassed = bypassed
         self.activePresetID = activePresetID
         self.activePresetName = activePresetName
         self.inputGainDB = inputGainDB
         self.outputGainDB = outputGainDB
+        self.balance = balance
         self.gainIsGlobal = gainIsGlobal
         self.outputDeviceName = outputDeviceName
         self.isRunning = isRunning

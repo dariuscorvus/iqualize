@@ -6,7 +6,7 @@ struct Iqualize: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "iqualize",
         abstract: "Control a running iQualize instance from the command line.",
-        subcommands: [Status.self, Presets.self, PresetCommand.self, Bypass.self, Gain.self],
+        subcommands: [Status.self, Presets.self, PresetCommand.self, Bypass.self, Gain.self, Balance.self],
         defaultSubcommand: Status.self
     )
 }

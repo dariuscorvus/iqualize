@@ -343,6 +343,17 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         eqWindowController?.syncUIToPreset()
     }
 
+    /// Sets stereo balance (-1 = hard left, +1 = hard right) — global, not per-preset,
+    /// mirroring the DreamUI footer slider's own clamp range.
+    func setBalance(_ value: Float) {
+        let clamped = min(max(value, -1), 1)
+        audioEngine.balance = clamped
+        var s = iQualizeState.load()
+        s.balance = clamped
+        s.save()
+        eqWindowController?.syncBalance(clamped)
+    }
+
     /// Resolves a preset by UUID string or case-insensitive exact name match.
     func resolvePreset(idOrName: String) -> EQPresetData? {
         if let id = UUID(uuidString: idOrName), let preset = presetStore.preset(for: id) {
@@ -358,6 +369,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
             activePresetName: audioEngine.activePreset.name,
             inputGainDB: audioEngine.inputGainDB,
             outputGainDB: audioEngine.outputGainDB,
+            balance: audioEngine.balance,
             gainIsGlobal: audioEngine.gainIsGlobal,
             outputDeviceName: audioEngine.outputDeviceName,
             isRunning: audioEngine.isRunning

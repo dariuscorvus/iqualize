@@ -15,6 +15,7 @@ protocol CLICommandHandling: AnyObject {
     @discardableResult func toggleBypassed() -> Bool
     func setInputGain(_ db: Float)
     func setOutputGain(_ db: Float)
+    func setBalance(_ value: Float)
 }
 
 /// Local control channel for the `iqualize` CLI: a Unix domain socket serving one
@@ -168,6 +169,11 @@ final class CLIControlServer: @unchecked Sendable {
         case CLICommand.setOutputGain:
             guard let db = request.floatArg else { return .failure("missing gain value") }
             handler.setOutputGain(db)
+            return .success(status: handler.statusSnapshot())
+
+        case CLICommand.setBalance:
+            guard let value = request.floatArg else { return .failure("missing balance value") }
+            handler.setBalance(value)
             return .success(status: handler.statusSnapshot())
 
         default:
