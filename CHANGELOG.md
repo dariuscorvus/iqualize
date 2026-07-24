@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.46.0] - 2026-07-24
+
+### Added
+- `iqualize balance [value]` — get or set stereo balance (-1 to 1) from the command line, matching the existing `gain input`/`gain output` commands. `iqualize status` now also reports balance
+
 ## [0.45.1] - 2026-07-24
 
 ### Fixed
