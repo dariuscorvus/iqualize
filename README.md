@@ -235,6 +235,8 @@ iQualize captures audio at the tap's native sample rate; AVAudioEngine's output 
 
 ## Credits
 
+Huge thanks to [@nordicdata](https://github.com/nordicdata) (Gary) for the detailed, well-written bug reports and feature requests — a lot of the fixes and improvements in the changelog exist because he took the time to file them properly.
+
 The Preset Browser's headphone and IEM EQ profiles come from the [OPRA project](https://github.com/opra-project/OPRA) — Open Profiles for Revealing Audio, an open, community-maintained directory of product information and EQ compensation curves. OPRA's data is licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/); each imported profile credits its original author in the browser.
 
 ---
