@@ -206,15 +206,27 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
     // MARK: - Actions
 
     /// Switches the active preset. Shared by the menu's `selectPreset(_:)` and the CLI.
+    /// Guarded behind the EQ window's unsaved-changes confirmation, if it's open — the alert
+    /// runs modally, so `didApply` is settled before this returns.
     @discardableResult
     func applyPreset(id: UUID) -> Bool {
-        guard let preset = presetStore.preset(for: id) else { return false }
-        audioEngine.activePreset = preset
-        var s = iQualizeState.load()
-        s.selectedPresetID = preset.id
-        s.save()
-        eqWindowController?.syncUIToPreset()
-        return true
+        guard presetStore.preset(for: id) != nil else { return false }
+        var didApply = false
+        let proceed = { [weak self] in
+            guard let self, let preset = self.presetStore.preset(for: id) else { return }
+            self.audioEngine.activePreset = preset
+            var s = iQualizeState.load()
+            s.selectedPresetID = preset.id
+            s.save()
+            self.eqWindowController?.syncUIToPreset()
+            didApply = true
+        }
+        if let eqWindowController {
+            eqWindowController.confirmDiscardIfNeeded(then: proceed)
+        } else {
+            proceed()
+        }
+        return didApply
     }
 
     @objc private func openEQSettings(_ sender: NSMenuItem) {

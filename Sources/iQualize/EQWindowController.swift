@@ -91,6 +91,12 @@ final class EQWindowController: NSWindowController {
         viewModel.syncFromAudioEngine(initial: true)
     }
 
+    /// Guards an external preset switch (menu bar / CLI) behind the same unsaved-changes
+    /// confirmation the in-window picker uses.
+    func confirmDiscardIfNeeded(then: @escaping () -> Void) {
+        viewModel.confirmDiscardIfNeeded(then: then)
+    }
+
     func syncBypass(_ on: Bool) {
         viewModel.bypass = on
     }
