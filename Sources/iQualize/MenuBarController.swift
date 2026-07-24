@@ -396,7 +396,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    @objc private func showAbout(_ sender: NSMenuItem) {
+    @objc func showAbout(_ sender: Any?) {
         let alert = NSAlert()
         alert.messageText = "iQualize"
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
