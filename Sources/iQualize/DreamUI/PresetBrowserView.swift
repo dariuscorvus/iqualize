@@ -51,7 +51,7 @@ struct PresetBrowserView: View {
         // split view's navigation behavior.
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                searchField
+                PresetSearchField(text: $searchText)
                 Divider()
                 sidebarList
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -78,29 +78,6 @@ struct PresetBrowserView: View {
         // otherwise filters the iQualize tab and hides deleted built-ins that are
         // actually there, ready to restore (#115).
         .onChange(of: catalog) { searchText = "" }
-    }
-
-    // MARK: - Search
-
-    private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("Search", text: $searchText)
-                .textFieldStyle(.plain)
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(.background)
     }
 
     // MARK: - Sidebar list

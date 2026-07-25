@@ -108,7 +108,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         let presetSubmenu = NSMenu()
         PresetMenuBuilder.addPresetSections(
             to: presetSubmenu,
-            builtIn: presetStore.allPresets.filter(\.isBuiltIn),
+            builtIn: presetStore.builtInPresets,
             custom: presetStore.customPresets,
             favoriteIDs: Set(presetStore.favoritePresetIDs),
             activePresetID: activePresetID,

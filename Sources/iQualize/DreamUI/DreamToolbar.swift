@@ -10,6 +10,9 @@ struct DreamToolbar: View {
     var body: some View {
         HStack(spacing: 6) {
             DreamToolbarGroup {
+                sidebarToggleGroup
+            }
+            DreamToolbarGroup {
                 undoRedoGroup
             }
             DreamToolbarGroup {
@@ -23,6 +26,17 @@ struct DreamToolbar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(theme.bgToolbar)
+    }
+
+    @ViewBuilder
+    private var sidebarToggleGroup: some View {
+        Button(action: { vm.togglePresetSidebar() }) {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(vm.presetSidebarVisible ? theme.accent : theme.text)
+        }
+        .controlSize(.regular)
+        .help(vm.presetSidebarVisible ? "Hide Preset Sidebar" : "Show Preset Sidebar")
     }
 
     @ViewBuilder

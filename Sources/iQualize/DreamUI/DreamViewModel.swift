@@ -39,6 +39,9 @@ final class DreamViewModel {
     var zoomRange: ZoomRange = .full
     var theme: DreamThemePreference = .auto
     var editing: EditingTarget?
+    /// Whether the native preset sidebar (issue #104) is shown, as an alternative to the
+    /// toolbar's menu-based picker.
+    var presetSidebarVisible: Bool = false
 
     // MARK: - Audio mirror (rebuilt from audioEngine on change)
 
@@ -122,6 +125,7 @@ final class DreamViewModel {
         if let raw = s.dreamTheme, let t = DreamThemePreference(rawValue: raw) { theme = t }
         snapToSemitone = s.snapToSemitone
         zoomRange = s.zoomRange.flatMap(ZoomRange.init(rawValue:)) ?? .full
+        presetSidebarVisible = s.presetSidebarVisible
         bandwidthDisplay = s.showBandwidthAsQ ? .q : .oct
         peakLimiter = s.peakLimiter
         bypass = s.bypassed
@@ -155,6 +159,13 @@ final class DreamViewModel {
     func persistZoomRange() {
         var s = iQualizeState.load()
         s.zoomRange = zoomRange.rawValue
+        s.save()
+    }
+
+    func togglePresetSidebar() {
+        presetSidebarVisible.toggle()
+        var s = iQualizeState.load()
+        s.presetSidebarVisible = presetSidebarVisible
         s.save()
     }
 
@@ -648,32 +659,41 @@ final class DreamViewModel {
         s.save()
     }
 
-    /// Confirms before deleting — a built-in is hidden (recoverable from the Preset Browser),
-    /// a custom preset is removed outright. Doesn't route through `confirmDiscardIfNeeded`:
-    /// offering to save unsaved edits first would be pointless when the whole preset is about
-    /// to be removed.
+    /// Confirms before deleting the active preset — a built-in is hidden (recoverable from the
+    /// Preset Browser), a custom preset is removed outright.
     func deleteCurrentPreset() {
         guard activePresetID != EQPresetData.flat.id else { return }
+        deletePreset(id: activePresetID)
+    }
+
+    /// Confirms before deleting any preset by id, active or not — the sidebar (issue #104) can
+    /// delete/hide a row that isn't the one currently loaded, which the toolbar's Delete button
+    /// (always the active preset) never had to handle. Doesn't route through
+    /// `confirmDiscardIfNeeded`: offering to save unsaved edits first would be pointless when
+    /// the whole preset is about to be removed.
+    func deletePreset(id: UUID) {
+        guard id != EQPresetData.flat.id, let preset = presetStore.preset(for: id) else { return }
+        let isActive = id == activePresetID
         let alert = NSAlert()
-        alert.messageText = "Delete \"\(presetName)\"?"
-        alert.informativeText = isBuiltIn
+        alert.messageText = "Delete \"\(preset.name)\"?"
+        alert.informativeText = preset.isBuiltIn
             ? "This hides it from the picker. You can bring it back later from the Preset Browser."
-            : isModified
+            : (isActive && isModified)
                 ? "This removes it and discards your unsaved changes. This can't be undone."
                 : "This can't be undone."
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        performDeleteCurrentPreset()
+        performDeletePreset(id: id, wasBuiltIn: preset.isBuiltIn, isActive: isActive)
     }
 
-    private func performDeleteCurrentPreset() {
-        guard activePresetID != EQPresetData.flat.id else { return }
-        if isBuiltIn {
-            presetStore.hideBuiltInPreset(id: activePresetID)
+    private func performDeletePreset(id: UUID, wasBuiltIn: Bool, isActive: Bool) {
+        if wasBuiltIn {
+            presetStore.hideBuiltInPreset(id: id)
         } else {
-            presetStore.deleteCustomPreset(id: activePresetID)
+            presetStore.deleteCustomPreset(id: id)
         }
+        guard isActive else { return }
         let old = audioEngine.activePreset
         audioEngine.activePreset = .flat
         savedSnapshot = .flat

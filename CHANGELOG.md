@@ -2,6 +2,12 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.49.0] - 2026-07-25
+
+### Added
+- Native sidebar as an alternative to the toolbar's menu-based preset picker (#104): lists Favorites/Built-in/Custom presets, toggled from a new toolbar button, and stays in sync with the toolbar picker and menu bar dropdown automatically since it reads from the same `PresetStore`. Shown/hidden state persists across launches, off by default so existing users see no change. The window grows/shrinks by the sidebar's width when toggled so the graph doesn't get squeezed
+- Deleting or hiding a preset from the sidebar works even when it isn't the currently active one — the toolbar's Delete button only ever handled the active preset, so this generalizes that logic (`DreamViewModel.deletePreset(id:)`)
+
 ## [0.48.0] - 2026-07-25
 
 ### Added

@@ -10,18 +10,24 @@ struct DreamRootView: View {
         let resolvedScheme: ColorScheme = vm.theme.colorScheme ?? systemScheme
         let theme = DreamTheme(scheme: resolvedScheme)
 
-        VStack(spacing: 0) {
-            DreamToolbar(vm: vm)
-                .padding(.top, 6)
-            VStack(spacing: 0) {
-                EQCanvasView(vm: vm)
-                EQReadoutGrid(vm: vm)
+        HStack(spacing: 0) {
+            if vm.presetSidebarVisible {
+                PresetSidebarView(vm: vm)
+                theme.line.frame(width: 1)
             }
-            .overlay(alignment: .top)    { theme.line.frame(height: 1) }
-            .overlay(alignment: .bottom) { theme.line.frame(height: 1) }
-            .padding(.vertical, 6)
-            DreamFooter(vm: vm)
-                .padding(.bottom, 14)
+            VStack(spacing: 0) {
+                DreamToolbar(vm: vm)
+                    .padding(.top, 6)
+                VStack(spacing: 0) {
+                    EQCanvasView(vm: vm)
+                    EQReadoutGrid(vm: vm)
+                }
+                .overlay(alignment: .top)    { theme.line.frame(height: 1) }
+                .overlay(alignment: .bottom) { theme.line.frame(height: 1) }
+                .padding(.vertical, 6)
+                DreamFooter(vm: vm)
+                    .padding(.bottom, 14)
+            }
         }
         .background(theme.bgWindow)
         .environment(\.dreamTheme, theme)
@@ -31,6 +37,7 @@ struct DreamRootView: View {
         .onChange(of: systemScheme) { _, _ in
             if vm.theme == .auto { applyWindowAppearance(scheme: systemScheme) }
         }
+        .onChange(of: vm.presetSidebarVisible) { _, visible in adjustWindowForSidebar(visible: visible) }
         .background(
             KeyEventHandler(vm: vm)
         )
@@ -47,6 +54,21 @@ struct DreamRootView: View {
         case .dark:
             window.appearance = NSAppearance(named: .darkAqua)
         }
+    }
+
+    /// Grows/shrinks the window by exactly the sidebar's width when it's toggled at runtime, so
+    /// the canvas keeps its comfortable width instead of getting squeezed. The window's initial
+    /// size already accounts for a sidebar that's visible on launch (`DreamHostingView`); this
+    /// only needs to handle the live toggle.
+    private func adjustWindowForSidebar(visible: Bool) {
+        guard let window = NSApp.windows.first(where: { $0.title.isEmpty || $0.title.contains("iQualize") }) else { return }
+        let delta = PresetSidebarView.width
+        var minSize = window.minSize
+        minSize.width += visible ? delta : -delta
+        window.minSize = minSize
+        var frame = window.frame
+        frame.size.width += visible ? delta : -delta
+        window.setFrame(frame, display: true, animate: true)
     }
 }
 

@@ -17,6 +17,13 @@ final class PresetStore {
         EQPresetData.builtInPresets.filter { !hiddenBuiltInPresetIDs.contains($0.id) } + customPresets
     }
 
+    /// Built-in presets currently visible in the picker (i.e. not hidden). Shared by every
+    /// preset-list surface (menu bar dropdown, in-window picker, sidebar) so they can't drift
+    /// out of sync on filtering.
+    var builtInPresets: [EQPresetData] {
+        allPresets.filter(\.isBuiltIn)
+    }
+
     /// Favorited presets, in favorite order. Skips IDs that no longer resolve to a preset.
     var favoritePresets: [EQPresetData] {
         favoritePresetIDs.compactMap { preset(for: $0) }
