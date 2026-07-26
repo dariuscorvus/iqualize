@@ -5,7 +5,7 @@ All notable changes to iQualize will be documented in this file.
 ## [0.51.1] - 2026-07-27
 
 ### Changed
-- CI: bumped `actions/checkout` and `actions/upload-artifact` v4 → v5 in the release workflow. v4 targets Node 20, which GitHub Actions runners have deprecated; the v0.51.0 release job warned on checkout, and the dispatch dry run additionally warned on upload-artifact (its step only runs on dry runs)
+- CI: bumped `actions/checkout` v4 → v5 and `actions/upload-artifact` v4 → v7 in the release workflow, clearing the runners' Node 20 deprecation warnings. The v0.51.0 release job warned on checkout; the dispatch dry run additionally warned on upload-artifact (its step only runs on dry runs), where v5 still targets Node 20 and v7 is the first Node 24 major with the same `name`/`path` inputs
 
 ## [0.51.0] - 2026-07-27
 
