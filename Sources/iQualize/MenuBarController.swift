@@ -374,6 +374,16 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         return presetStore.allPresets.first { $0.name.caseInsensitiveCompare(idOrName) == .orderedSame }
     }
 
+    var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+    }
+
+    /// Git commit stamped into the installed Info.plist by install.sh; nil for
+    /// unstamped builds.
+    var appGitCommit: String? {
+        Bundle.main.infoDictionary?["IQGitCommit"] as? String
+    }
+
     func statusSnapshot() -> CLIStatusPayload {
         CLIStatusPayload(
             bypassed: audioEngine.bypassed,
@@ -384,7 +394,9 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
             balance: audioEngine.balance,
             gainIsGlobal: audioEngine.gainIsGlobal,
             outputDeviceName: audioEngine.outputDeviceName,
-            isRunning: audioEngine.isRunning
+            isRunning: audioEngine.isRunning,
+            appVersion: appVersion,
+            gitCommit: appGitCommit
         )
     }
 
@@ -411,10 +423,9 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
     @objc func showAbout(_ sender: Any?) {
         let alert = NSAlert()
         alert.messageText = "iQualize"
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         alert.informativeText = """
         System-wide audio equalizer for macOS.
-        Version \(version)
+        Version \(appVersion)\(appGitCommit.map { " (\($0))" } ?? "")
 
         Headphone EQ profiles come from the OPRA project, licensed CC BY-SA 4.0.
         """

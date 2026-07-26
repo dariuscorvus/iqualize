@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.51.0] - 2026-07-26
+
+### Added
+- `iqualize status` now reports the app version and build commit as its first line (`Version: 0.51.0 (abc1234)`), read live from the running app over the control socket. The About dialog shows the same. install.sh stamps the commit into the installed app's Info.plist (`IQGitCommit`, with a `-dirty` suffix for uncommitted changes); builds without git omit it. Suggested by Gary (@nordicdata, #136)
+
 ## [0.50.0] - 2026-07-26
 
 ### Added

@@ -84,13 +84,25 @@ cp -f Sources/iQualize/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # Copy README so the in-app Help window can render the Features section
 cp -f README.md "$APP/Contents/Resources/README.md"
 
-# Always update Info.plist — a plist change invalidates the signature too
-if ! cmp -s Sources/iQualize/Info.plist "$APP/Contents/Info.plist"; then
-    cp -f Sources/iQualize/Info.plist "$APP/Contents/Info.plist"
-    NEEDS_RESIGN=1
-else
-    cp -f Sources/iQualize/Info.plist "$APP/Contents/Info.plist"
+# Stamp the build's git commit into the installed Info.plist (IQGitCommit) so
+# the app can report it (iqualize status, About dialog). The source plist stays
+# unstamped; the stamp goes into a temp copy that is compared against the
+# installed plist — comparing the unstamped source directly would always differ
+# and force a re-sign on every run. No git / no repo → no stamp, app omits it.
+STAMPED_PLIST=$(mktemp)
+cp Sources/iQualize/Info.plist "$STAMPED_PLIST"
+GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || true)
+if [ -n "$GIT_COMMIT" ]; then
+    git diff --quiet HEAD 2>/dev/null || GIT_COMMIT="${GIT_COMMIT}-dirty"
+    /usr/libexec/PlistBuddy -c "Add :IQGitCommit string $GIT_COMMIT" "$STAMPED_PLIST"
 fi
+
+# Always update Info.plist — a plist change invalidates the signature too
+if ! cmp -s "$STAMPED_PLIST" "$APP/Contents/Info.plist"; then
+    NEEDS_RESIGN=1
+fi
+cp -f "$STAMPED_PLIST" "$APP/Contents/Info.plist"
+rm -f "$STAMPED_PLIST"
 
 if [ "$NEEDS_RESIGN" = "1" ]; then
     # Sign the whole bundle after every resource is in place so the sealed

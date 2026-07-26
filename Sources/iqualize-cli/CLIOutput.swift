@@ -36,7 +36,10 @@ func formatBalance(_ value: Float) -> String {
 
 func formatStatus(_ status: CLIStatusPayload) -> String {
     let mode = status.gainIsGlobal ? "shared" : "per-preset"
+    let version = status.appVersion ?? "unknown"
+    let versionLine = status.gitCommit.map { "\(version) (\($0))" } ?? version
     return """
+    Version: \(versionLine)
     Bypass: \(status.bypassed ? "on" : "off")
     Preset: \(status.activePresetName)
     Gain: \(String(format: "input %+.1f dB, output %+.1f dB", status.inputGainDB, status.outputGainDB)) (\(mode))

@@ -12,7 +12,7 @@ struct Iqualize: ParsableCommand {
 }
 
 struct Status: ParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Show bypass state, active preset, gain, and output device.")
+    static let configuration = CommandConfiguration(abstract: "Show app version, bypass state, active preset, gain, balance, and output device.")
 
     func run() {
         let response = requireOK(sendOrExit(CLIRequest(command: CLICommand.status)))
