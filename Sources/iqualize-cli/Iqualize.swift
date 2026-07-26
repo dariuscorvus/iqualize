@@ -6,9 +6,22 @@ struct Iqualize: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "iqualize",
         abstract: "Control a running iQualize instance from the command line.",
-        subcommands: [Status.self, Presets.self, PresetCommand.self, Bypass.self, Gain.self, Balance.self],
+        subcommands: [Status.self, Version.self, Presets.self, PresetCommand.self, Bypass.self, Gain.self, Balance.self],
         defaultSubcommand: Status.self
     )
+}
+
+struct Version: ParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "Show the app version and build commit.")
+
+    func run() {
+        let response = requireOK(sendOrExit(CLIRequest(command: CLICommand.status)))
+        guard let status = response.status else {
+            printErr("Error: missing status in response")
+            return
+        }
+        print(formatVersion(status))
+    }
 }
 
 struct Status: ParsableCommand {

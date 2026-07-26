@@ -189,6 +189,7 @@ button needed.)
 ```
 iqualize                      # same as `iqualize status`
 iqualize status               # app version, bypass state, active preset, gain, balance, output device
+iqualize version              # just the app version and build commit
 iqualize presets               # list all presets (* = active, ♥ = favorite)
 iqualize preset "Bass Boost"   # switch the active preset by name or ID
 iqualize bypass [on|off|toggle]
