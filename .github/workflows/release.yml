@@ -32,7 +32,7 @@ jobs:
       HAS_SIGNING_CREDENTIALS: ${{ secrets.APPLE_CERTIFICATE != '' }}
       HAS_NOTARY_CREDENTIALS: ${{ secrets.APPLE_ID != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # the thanks section walks merge history between tags
 
