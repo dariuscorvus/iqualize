@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.49.1] - 2026-07-26
+
+### Fixed
+- Call audio (FaceTime, WhatsApp, phone calls) was very quiet while iQualize ran (#131). macOS ducks all "other audio" during a voice session but exempts the call's own stream; tapping and re-rendering that stream through iQualize turned it into "other audio", so the OS ducked the voice itself by ~18 dB. The capture helper now excludes any process holding the microphone from the tap — call audio plays natively at full volume (skipping the EQ for the duration of the call) and rejoins the tap when the mic is released
+
 ## [0.49.0] - 2026-07-26
 
 ### Added

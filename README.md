@@ -169,6 +169,7 @@ Accessible via the gear icon in the EQ window, the Settings item in the menu bar
 - AirPods hand off automatically between your Mac and iPhone mid-playback (Apple Continuity), the same as any other app — no need to quit iQualize or manually switch output first
 - Automatic output device switching and reconnection
 - Apps launched after iQualize is already running get picked up into the EQ automatically, no restart needed
+- Calls (FaceTime, WhatsApp, Discord, Zoom, phone calls) play at normal volume: an app that's actively using the microphone is passed through untouched for the duration of the call, then picked back up into the EQ when the call ends. Call audio skips the EQ while the call is live — macOS would otherwise duck the call's voice far below normal
 - Sleep/wake handling — pauses on sleep, resumes on wake
 - Window state and all settings persist across launches
 - Codesigned for stable TCC permissions across rebuilds
@@ -207,6 +208,8 @@ iQualize uses Core Audio Taps (CATap), introduced in macOS 14.2, to intercept sy
 
 The tap and IOProc run in a small helper process (`iQualizeCapture`), separate from the app that renders the processed audio. A process that both holds an active tap and drives the render stream on the same output device gets treated by `coreaudiod` as non-preemptible — which silently blocks AirPods from auto-switching between your Mac and iPhone (Apple Continuity). Splitting tap-ownership from rendering into two processes keeps that path free, so Continuity handoff works the same as it would with any other app.
 
+Apps in a call are excluded from the tap while the call is live. macOS ducks all "other audio" on the output device during a voice session but exempts the session owner's own stream — and a tapped call re-rendered through iQualize counts as other audio, so the OS ducked the call voice itself by ~18 dB (#131). The helper watches for processes running both audio input and output (the signature of a call — mic-only processes like dictation stay in the tap), removes them from the live tap's exclusion list, and re-includes them when the mic is released. Excluded call audio plays directly at the session-owner volume; the EQ skips it for the duration of the call.
+
 ```mermaid
 flowchart LR
     subgraph capture["iQualizeCapture (helper process)"]
@@ -224,6 +227,7 @@ flowchart LR
 
     shm -->|CaptureClient| source
     apps -.->|muted by tap| device["Output Device"]
+    calls["Call Apps (mic active)"] -->|"excluded from tap, play direct"| device
     limiter -->|AVAudioEngine outputNode| device
 ```
 
