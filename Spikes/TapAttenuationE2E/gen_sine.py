@@ -21,6 +21,8 @@ AMP_DB = -30.0
 
 amp = 10 ** (AMP_DB / 20)
 path = sys.argv[1] if len(sys.argv) > 1 else "sine.wav"
+if len(sys.argv) > 2:
+    SECONDS = int(sys.argv[2])
 
 w = wave.open(path, "w")
 w.setnchannels(2)
@@ -32,4 +34,4 @@ for i in range(SR * SECONDS):
     frames += struct.pack("<hh", s, s)
 w.writeframes(bytes(frames))
 w.close()
-print(f"{path}: {SECONDS}s 440 Hz sine at {AMP_DB} dBFS, {SR} Hz stereo")
+print(f"{path}: {SECONDS}s {FREQ:.0f} Hz sine at {AMP_DB} dBFS, {SR} Hz stereo")

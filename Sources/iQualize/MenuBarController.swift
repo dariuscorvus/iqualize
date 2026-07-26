@@ -385,7 +385,8 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
     }
 
     func statusSnapshot() -> CLIStatusPayload {
-        CLIStatusPayload(
+        let capture = audioEngine.captureTelemetry()
+        return CLIStatusPayload(
             bypassed: audioEngine.bypassed,
             activePresetID: audioEngine.activePreset.id,
             activePresetName: audioEngine.activePreset.name,
@@ -396,7 +397,11 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
             outputDeviceName: audioEngine.outputDeviceName,
             isRunning: audioEngine.isRunning,
             appVersion: appVersion,
-            gitCommit: appGitCommit
+            gitCommit: appGitCommit,
+            captureFillFrames: capture?.fillFrames,
+            captureDriftPpm: capture?.driftPpm,
+            captureUnderruns: capture?.underruns,
+            captureOverrunResyncs: capture?.overrunResyncs
         )
     }
 

@@ -2,6 +2,20 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.51.2] - 2026-07-27
+
+### Fixed
+- The capture ring buffer had no drift handling (#133): the helper fills it on the tap aggregate's clock, the app drains it on the output device's clock, and when those clocks differ (USB or Bluetooth output) the fill level walks until the ring slips a sub-millisecond chunk. The reader now holds the ring at a fixed fill level with a micro-resampler (fill-level P-controller, Catmull-Rom interpolation, correction clamped to ±500 ppm ≈ 0.87 cent — inaudible; bit-exact passthrough at zero drift). Verified against ±100 ppm synthetic drift: fill converges, zero slips, a coherent 4 s tone measurement reads within 0.1 dB
+- Capture latency is now pinned at ~43 ms (2048 frames at 48 kHz). Previously it was whatever the startup race left in the ring — anywhere from 0 to 341 ms
+- The ring's head indices are now published with release/acquire ordering (new `IQRingAtomics` C shim). The plain stores let the reader observe an advanced write head before the sample data behind it on arm64
+- Investigating #133's evidence found the measured coherence loss (1-5 dB, run to run) came mostly from a different bug pair: the e2e script's own `afplay` and `sox` are new Core Audio processes, so the app restarted its tap (#87 poll) inside the 4 s measurement window, splicing ~100 ms of silence per restart. `e2e-tap-test.sh` now measures the last 4 s of a 12 s capture, past the restarts. On host-clocked device pairs (BlackHole) the pre-fix ring measures clean with the fixed window — real clock drift needs independent hardware clocks
+
+### Changed
+- `Spikes/TapAttenuationE2E`: `goertzel.py` gained a `--coherent` mode (whole-window integration, degraded by any phase discontinuity) and `e2e-tap-test.sh` uses it as a phase-coherence gate (block vs coherent ≤ 0.5 dB); the unity tolerance tightened from 3 dB back to 1 dB. Measured: 6 consecutive runs at +0.00 dB on both checks (16ch and 2ch)
+
+### Added
+- `iqualize status` reports capture-ring drift telemetry: `Capture: fill 2048 frames, drift +0.0 ppm, underruns 0, resyncs 0`. Counters reset on every capture (re)start (device switch, sleep/wake)
+
 ## [0.51.1] - 2026-07-27
 
 ### Changed
