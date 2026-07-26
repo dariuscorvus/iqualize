@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Generate the e2e test tone: 440 Hz stereo sine at -30 dBFS, 48 kHz, 8 s.
+"""Generate the e2e test tone: 997 Hz stereo sine at -30 dBFS, 48 kHz, 8 s.
+
+997 Hz is the broadcast-measurement prime: it sits between musical pitches
+(B5 = 987.8, C6 = 1046.5), so background music never lands on the
+measurement bin.
 
 -30 dBFS leaves 18 dB of headroom, so even a wrongly-uncompensated x8 boost
 (16ch device) lands at -12 dBFS without clipping — every failure mode stays
@@ -12,7 +16,7 @@ import wave
 
 SR = 48000
 SECONDS = 8
-FREQ = 440.0
+FREQ = 997.0
 AMP_DB = -30.0
 
 amp = 10 ** (AMP_DB / 20)

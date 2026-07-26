@@ -47,6 +47,10 @@ nonisolated(unsafe) var dataMask: UInt64 = 0
 nonisolated(unsafe) var tapID = AudioObjectID(kAudioObjectUnknown)
 nonisolated(unsafe) var aggID = AudioObjectID(kAudioObjectUnknown)
 nonisolated(unsafe) var procID: AudioDeviceIOProcID?
+nonisolated(unsafe) var tapDescription: AnyObject?
+nonisolated(unsafe) var baseExcludedObjects: [AudioObjectID] = []
+nonisolated(unsafe) var excludedMicUsers: Set<AudioObjectID> = []
+nonisolated(unsafe) var micPollTimer: DispatchSourceTimer?
 
 // MARK: - Helpers
 
@@ -63,6 +67,8 @@ func caCheckExit(_ status: OSStatus, _ msg: String, code: Int32) {
 }
 
 @Sendable func cleanup() {
+    micPollTimer?.cancel()
+    micPollTimer = nil
     if aggID != kAudioObjectUnknown {
         if let p = procID {
             AudioDeviceStop(aggID, p)
@@ -102,6 +108,117 @@ nonisolated(unsafe) private var didCleanup = false
     cleanup()
 }
 
+// MARK: - Call exclusion (#131)
+//
+// While a process runs a voice session (WhatsApp/FaceTime/the phone-relay
+// daemon hold the microphone), macOS ducks all "other audio" on the output
+// device but exempts the session owner's own stream. Tapping + muting a call
+// app and re-rendering its voice through the main app's engine turns that
+// voice into "other audio" — the OS ducks it (~18 dB measured, #131) and
+// calls sound far too quiet. Excluding mic-holding processes from the tap
+// lets their audio play natively at session-owner volume. Their audio skips
+// the EQ while they hold the mic and returns to the tap when they release it.
+//
+// Polled, not listened: the process-list property listener goes silent for a
+// process that itself holds an active CATap (#87) — assume per-process
+// properties behave the same and poll.
+
+func processObjectList() -> [AudioObjectID] {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyProcessObjectList,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    let systemObject = AudioObjectID(kAudioObjectSystemObject)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(systemObject, &address, 0, nil, &size) == noErr else { return [] }
+    let count = Int(size) / MemoryLayout<AudioObjectID>.size
+    guard count > 0 else { return [] }
+    var ids = [AudioObjectID](repeating: AudioObjectID(kAudioObjectUnknown), count: count)
+    guard AudioObjectGetPropertyData(systemObject, &address, 0, nil, &size, &ids) == noErr else { return [] }
+    return ids
+}
+
+private func processFlag(_ obj: AudioObjectID, _ selector: AudioObjectPropertySelector) -> Bool {
+    var address = AudioObjectPropertyAddress(
+        mSelector: selector,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var running: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    guard AudioObjectGetPropertyData(obj, &address, 0, nil, &size, &running) == noErr else { return false }
+    return running != 0
+}
+
+/// A call runs BOTH directions: mic capture and voice playback. Requiring
+/// both keeps mic-only processes (dictation, screen recording, audio
+/// measurement tools) in the tap — excluding them buys nothing and every
+/// description update churns the live tap.
+func processInCall(_ obj: AudioObjectID) -> Bool {
+    processFlag(obj, kAudioProcessPropertyIsRunningInput)
+        && processFlag(obj, kAudioProcessPropertyIsRunningOutput)
+}
+
+func processLogName(_ obj: AudioObjectID) -> String {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioProcessPropertyBundleID,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var bundleID: CFString = "" as CFString
+    var size = UInt32(MemoryLayout<CFString>.size)
+    let err = withUnsafeMutablePointer(to: &bundleID) { ptr in
+        AudioObjectGetPropertyData(obj, &address, 0, nil, &size, ptr)
+    }
+    let bid = err == noErr ? (bundleID as String) : ""
+    return bid.isEmpty ? "audio object \(obj)" : bid
+}
+
+func micUsingProcesses() -> Set<AudioObjectID> {
+    Set(processObjectList().filter(processInCall))
+}
+
+/// Push the current exclusion list (base + mic users) into the live tap.
+/// kAudioTapPropertyDescription is documented settable on an existing tap.
+@available(macOS 14.2, *)
+func applyTapExclusions() {
+    guard let desc = tapDescription as? CATapDescription,
+          tapID != kAudioObjectUnknown else { return }
+    desc.processes = baseExcludedObjects + excludedMicUsers.filter { !baseExcludedObjects.contains($0) }
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioTapPropertyDescription,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var descRef: CATapDescription? = desc
+    let err = withUnsafeMutablePointer(to: &descRef) { ptr in
+        AudioObjectSetPropertyData(tapID, &address, 0, nil,
+                                   UInt32(MemoryLayout<CATapDescription?>.stride), ptr)
+    }
+    if err != noErr {
+        os_log(.error, log: capLog, "tap description update failed: OSStatus %{public}d", err)
+    }
+}
+
+@available(macOS 14.2, *)
+func pollMicUsers() {
+    let mic = micUsingProcesses()
+    guard mic != excludedMicUsers else { return }
+    let added = mic.subtracting(excludedMicUsers)
+    let removed = excludedMicUsers.subtracting(mic)
+    excludedMicUsers = mic
+    applyTapExclusions()
+    for obj in added {
+        os_log(.default, log: capLog,
+               "call exclusion: +%{public}@ (holds mic, plays direct)", processLogName(obj))
+    }
+    for obj in removed {
+        os_log(.default, log: capLog,
+               "call exclusion: -%{public}@ (released mic, back through EQ)", processLogName(obj))
+    }
+}
+
 // MARK: - Entry point (gated on macOS 14.2 for CATap availability)
 
 @available(macOS 14.2, *)
@@ -133,6 +250,16 @@ func run() {
     if parentObj != kAudioObjectUnknown { excluded.append(parentObj) }
     let ourObj = pidToObject(getpid())
     if ourObj != kAudioObjectUnknown { excluded.append(ourObj) }
+    baseExcludedObjects = excluded
+
+    // Also exclude anything already holding the mic — a call may be in
+    // progress when the tap is created, including on tap restarts (#131).
+    excludedMicUsers = micUsingProcesses()
+    for obj in excludedMicUsers where !baseExcludedObjects.contains(obj) {
+        excluded.append(obj)
+        os_log(.default, log: capLog,
+               "call exclusion at start: %{public}@", processLogName(obj))
+    }
 
     // 2. Create CATap
     let tapDesc = CATapDescription(stereoGlobalTapButExcludeProcesses: excluded)
@@ -145,6 +272,7 @@ func run() {
         AudioHardwareCreateProcessTap(tapDesc, &tapID),
         "Failed to create process tap", code: 10
     )
+    tapDescription = tapDesc
     os_log(.default, log: capLog, "tap created id=%{public}d", tapID)
 
     // 3. Read tap format
@@ -320,6 +448,15 @@ func run() {
         }
     }
     stdinThread.start()
+
+    // 8. Watch for processes starting/stopping mic use (calls) and update
+    //    the tap's exclusion list live (#131). dispatchMain() below services
+    //    the main queue.
+    let timer = DispatchSource.makeTimerSource(queue: .main)
+    timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
+    timer.setEventHandler { pollMicUsers() }
+    timer.resume()
+    micPollTimer = timer
 }
 
 // Dispatch-based signal handling. C signal handlers run in a context where
