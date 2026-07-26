@@ -35,7 +35,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.presetStore = presetStore
         self.eqWindowController = eqWindowController
 
-        let window = HelpAwareWindow(
+        let window = ShortcutAwareWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 0),
             styleMask: [.titled, .closable],
             backing: .buffered, defer: true

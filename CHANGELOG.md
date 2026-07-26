@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.49.0] - 2026-07-26
+
+### Added
+- Cmd+W closes the frontmost iQualize window — EQ, Settings, Preset Browser, and Help. Works in both Dock and menu-bar-only mode; the Window menu also gained a "Close Window" item. Requested by @json20 (#129)
+
 ## [0.48.1] - 2026-07-26
 
 ### Fixed

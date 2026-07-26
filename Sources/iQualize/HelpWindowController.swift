@@ -15,13 +15,28 @@ enum HelpShortcut {
     }
 }
 
-/// NSWindow subclass that catches Cmd+? — used for the Settings window
-/// (and any other window where we want the help shortcut to fire).
+/// Routes Cmd+W to close the receiving window — same accessory-mode reasoning
+/// as `HelpShortcut`, since Close normally lives on a File menu this app
+/// doesn't show (#129).
 @available(macOS 14.2, *)
 @MainActor
-final class HelpAwareWindow: NSWindow {
+enum CloseShortcut {
+    static func handles(_ event: NSEvent, for window: NSWindow) -> Bool {
+        guard event.modifierFlags.intersection([.command, .shift, .option, .control]) == [.command],
+              event.charactersIgnoringModifiers == "w" else { return false }
+        window.performClose(nil)
+        return true
+    }
+}
+
+/// NSWindow subclass that catches the app-wide shortcuts (Cmd+?, Cmd+W) —
+/// base class for every titled window in the app.
+@available(macOS 14.2, *)
+@MainActor
+class ShortcutAwareWindow: NSWindow {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if HelpShortcut.handles(event) { return true }
+        if CloseShortcut.handles(event, for: self) { return true }
         return super.performKeyEquivalent(with: event)
     }
 }
@@ -30,7 +45,7 @@ final class HelpAwareWindow: NSWindow {
 @MainActor
 final class HelpWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate {
     init() {
-        let window = NSWindow(
+        let window = ShortcutAwareWindow(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 600),
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered, defer: true

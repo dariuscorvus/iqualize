@@ -9,7 +9,7 @@ import SwiftUI
 @MainActor
 final class PresetBrowserWindowController: NSWindowController, NSWindowDelegate {
     init(presetStore: PresetStore, onImportOPRA: @escaping (OPRAProductEntry, OPRACurveEntry) -> Void) {
-        let window = HelpAwareWindow(
+        let window = ShortcutAwareWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered, defer: true
