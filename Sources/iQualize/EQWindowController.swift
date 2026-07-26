@@ -5,17 +5,12 @@ import SwiftUI
 
 @available(macOS 14.2, *)
 @MainActor
-final class EQWindow: NSWindow {
+final class EQWindow: ShortcutAwareWindow {
     var onKeyDown: ((NSEvent) -> Bool)?
 
     override func keyDown(with event: NSEvent) {
         if onKeyDown?(event) == true { return }
         super.keyDown(with: event)
-    }
-
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if HelpShortcut.handles(event) { return true }
-        return super.performKeyEquivalent(with: event)
     }
 }
 

@@ -162,6 +162,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // the names of open titled windows below the standard items.
         let windowMenuItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
+        let closeItem = windowMenu.addItem(withTitle: "Close Window",
+                                            action: #selector(NSWindow.performClose(_:)),
+                                            keyEquivalent: "w")
+        closeItem.keyEquivalentModifierMask = [.command]
         let minimizeItem = windowMenu.addItem(withTitle: "Minimize",
                                                action: #selector(NSWindow.miniaturize(_:)),
                                                keyEquivalent: "m")
@@ -179,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         // Help menu — standard macOS pattern. Not registered as NSApp.helpMenu so
         // macOS doesn't add the Help search popover (we ship our own help window).
-        // Cmd+? itself is handled by HelpAwareWindow.performKeyEquivalent so the
+        // Cmd+? itself is handled by ShortcutAwareWindow.performKeyEquivalent so the
         // shortcut works regardless of activation policy.
         let helpMenuItem = NSMenuItem()
         let helpMenu = NSMenu(title: "Help")
