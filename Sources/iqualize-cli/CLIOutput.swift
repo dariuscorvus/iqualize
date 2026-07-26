@@ -34,9 +34,16 @@ func formatBalance(_ value: Float) -> String {
     return value < 0 ? "L\(pct)" : "R\(pct)"
 }
 
+/// "0.51.0 (abc1234)", commit omitted for unstamped builds.
+func formatVersion(_ status: CLIStatusPayload) -> String {
+    let version = status.appVersion ?? "unknown"
+    return status.gitCommit.map { "\(version) (\($0))" } ?? version
+}
+
 func formatStatus(_ status: CLIStatusPayload) -> String {
     let mode = status.gainIsGlobal ? "shared" : "per-preset"
     return """
+    Version: \(formatVersion(status))
     Bypass: \(status.bypassed ? "on" : "off")
     Preset: \(status.activePresetName)
     Gain: \(String(format: "input %+.1f dB, output %+.1f dB", status.inputGainDB, status.outputGainDB)) (\(mode))

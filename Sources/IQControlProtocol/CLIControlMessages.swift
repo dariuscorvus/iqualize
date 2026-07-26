@@ -64,8 +64,14 @@ public struct CLIStatusPayload: Codable, Sendable {
     public var gainIsGlobal: Bool
     public var outputDeviceName: String
     public var isRunning: Bool
+    /// App version (CFBundleShortVersionString). Optional so a newer CLI still decodes
+    /// responses from an older app that doesn't send it.
+    public var appVersion: String?
+    /// Git commit the app was built from (IQGitCommit, stamped by install.sh).
+    /// nil for unstamped builds (e.g. plain `swift build` outside a git checkout).
+    public var gitCommit: String?
 
-    public init(bypassed: Bool, activePresetID: UUID, activePresetName: String, inputGainDB: Float, outputGainDB: Float, balance: Float, gainIsGlobal: Bool, outputDeviceName: String, isRunning: Bool) {
+    public init(bypassed: Bool, activePresetID: UUID, activePresetName: String, inputGainDB: Float, outputGainDB: Float, balance: Float, gainIsGlobal: Bool, outputDeviceName: String, isRunning: Bool, appVersion: String? = nil, gitCommit: String? = nil) {
         self.bypassed = bypassed
         self.activePresetID = activePresetID
         self.activePresetName = activePresetName
@@ -75,6 +81,8 @@ public struct CLIStatusPayload: Codable, Sendable {
         self.gainIsGlobal = gainIsGlobal
         self.outputDeviceName = outputDeviceName
         self.isRunning = isRunning
+        self.appVersion = appVersion
+        self.gitCommit = gitCommit
     }
 }
 
