@@ -1,0 +1,110 @@
+# Release: build a universal (Apple Silicon + Intel) DMG on every version tag
+# and publish a GitHub Release with auto-generated notes plus a thanks section
+# for the people whose issue reports the release closes.
+#
+# The DMG is ad-hoc signed unless the APPLE_* secrets are configured —
+# downloads need `xattr -dr com.apple.quarantine`, same as every release so
+# far (see README). Secrets for a signed + notarized release:
+#   APPLE_CERTIFICATE            base64 .p12 Developer ID certificate
+#   APPLE_CERTIFICATE_PASSWORD   its password
+#   APPLE_SIGNING_IDENTITY       e.g. "Developer ID Application: …"
+# Additionally, for notarization:
+#   APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID
+#
+# workflow_dispatch is the dry run: build + test + DMG as an artifact,
+# no release created.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    # The secrets context is not available in step `if` conditions;
+    # these flags carry the presence check instead.
+    env:
+      HAS_SIGNING_CREDENTIALS: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      HAS_NOTARY_CREDENTIALS: ${{ secrets.APPLE_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the thanks section walks merge history between tags
+
+      - name: Check the tag matches the app version
+        if: github.event_name == 'push'
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Sources/iQualize/Info.plist)
+          test "v$version" = "${GITHUB_REF_NAME}" || {
+            echo "Tag ${GITHUB_REF_NAME} does not match Info.plist version $version" >&2
+            exit 1
+          }
+
+      - name: Run tests
+        run: swift test
+
+      - name: Import signing certificate when configured
+        if: env.HAS_SIGNING_CREDENTIALS == 'true'
+        run: |
+          echo "${{ secrets.APPLE_CERTIFICATE }}" | base64 -d > /tmp/cert.p12
+          security create-keychain -p ci-keychain ci.keychain
+          security default-keychain -s ci.keychain
+          security unlock-keychain -p ci-keychain ci.keychain
+          security import /tmp/cert.p12 -k ci.keychain \
+            -P "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci-keychain ci.keychain
+          rm /tmp/cert.p12
+          echo "IQ_SIGN_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}" >> "$GITHUB_ENV"
+
+      - name: Build the DMG (universal, verified)
+        run: bash create-dmg.sh
+
+      - name: Verify both architectures inside the DMG
+        run: |
+          hdiutil attach -readonly -mountpoint /tmp/iq-dmg iQualize-*.dmg
+          lipo -archs /tmp/iq-dmg/iQualize.app/Contents/MacOS/iQualize \
+            | tee /dev/stderr | grep -q "x86_64 arm64"
+          hdiutil detach /tmp/iq-dmg
+
+      - name: Notarize when configured
+        if: env.HAS_NOTARY_CREDENTIALS == 'true'
+        run: |
+          xcrun notarytool submit iQualize-*.dmg --wait \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --password "${{ secrets.APPLE_PASSWORD }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}"
+          xcrun stapler staple iQualize-*.dmg
+
+      - name: Upload DMG artifact (dry run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: iQualize-dmg
+          path: iQualize-*.dmg
+
+      - name: Build the thanks section for issue reporters
+        if: github.event_name == 'push'
+        run: bash .github/scripts/release-thanks.sh "${GITHUB_REF_NAME}" > /tmp/thanks.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create the release
+        if: github.event_name == 'push'
+        run: |
+          if [ "$HAS_SIGNING_CREDENTIALS" = "true" ] && [ "$HAS_NOTARY_CREDENTIALS" = "true" ]; then
+            install_note=.github/release-notes/install-signed.md
+          else
+            install_note=.github/release-notes/install-unsigned.md
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "iQualize ${GITHUB_REF_NAME}" \
+            --notes "$(cat "$install_note" /tmp/thanks.md)" \
+            --generate-notes \
+            iQualize-*.dmg
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -2,6 +2,12 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.50.0] - 2026-07-26
+
+### Added
+- Intel support: distributable DMGs are now universal binaries (Apple Silicon + Intel). `create-dmg.sh` builds both slices and refuses to package a DMG where any of the three binaries (app, capture helper, CLI) is missing an architecture. Local dev builds stay native-only for speed; `IQ_UNIVERSAL=1 bash install.sh` opts in
+- Automated releases: pushing a `vX.Y.Z` tag now builds, tests, verifies, and publishes the GitHub Release with the DMG attached (`.github/workflows/release.yml`). Release notes are auto-generated from merged PRs, plus a Thanks section crediting the people whose issue reports the release closes. The workflow scaffolds Developer ID signing + notarization behind `APPLE_*` secrets for later; until then releases stay ad-hoc signed with the usual quarantine instructions
+
 ## [0.49.1] - 2026-07-26
 
 ### Fixed
