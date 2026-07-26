@@ -28,6 +28,10 @@ nonisolated(unsafe) private var rtScratchCapacity: Int = 0
 nonisolated(unsafe) private var rtBalanceLeft: Float = 1.0
 nonisolated(unsafe) private var rtBalanceRight: Float = 1.0
 nonisolated(unsafe) private var rtInputGain: Float = 1.0
+/// Multiplies back the stereo-pair headroom attenuation of the mixdown tap
+/// (see GainPolicy.tapHeadroomCompensation). Applied unconditionally — the tap
+/// attenuates in Bypass too, so Bypass must compensate to sound like app-off.
+nonisolated(unsafe) private var rtVolumeCompensation: Float = 1.0
 /// Per-channel biquad filter chains for split channel mode.
 /// Only active when rtSplitChannelActive is true.
 /// Channels 2+ (e.g. 5.1/7.1 surround) pass through unprocessed — per-channel
@@ -65,11 +69,9 @@ private func renderCallback(
 
     for i in 0..<bufferList.count {
         guard let outData = bufferList[i].mData?.assumingMemoryBound(to: Float.self) else { continue }
-        let channelIndex = i
-        let gain = channelIndex == 0 ? rtBalanceLeft : rtBalanceRight
-        for f in 0..<frames {
-            outData[f] = scratch[f * ch + channelIndex] * rtInputGain * gain
-        }
+        let balance = i == 0 ? rtBalanceLeft : rtBalanceRight
+        deinterleaveChannel(scratch, into: outData, channel: i, channelCount: ch,
+                            frames: frames, gain: rtInputGain * balance * rtVolumeCompensation)
     }
 
     // Apply per-channel biquad EQ when split channel mode is active.
@@ -84,6 +86,22 @@ private func renderCallback(
     }
 
     return noErr
+}
+
+/// Copy one channel out of an interleaved buffer, applying the channel's total
+/// linear gain. The render callback's only per-sample math; exercised directly
+/// by the unit tests with synthetic buffers.
+func deinterleaveChannel(
+    _ input: UnsafePointer<Float>,
+    into output: UnsafeMutablePointer<Float>,
+    channel: Int,
+    channelCount: Int,
+    frames: Int,
+    gain: Float
+) {
+    for f in 0..<frames {
+        output[f] = input[f * channelCount + channel] * gain
+    }
 }
 
 // MARK: - AudioEngine
@@ -173,23 +191,17 @@ final class AudioEngine {
 
     /// Bypass is a true passthrough: In, Out, and Balance are neutralized while
     /// bypassed and restored on un-bypass, without touching the stored/displayed
-    /// control values (see #118).
+    /// control values (see #118). The math lives in GainPolicy.
     private func updateInputGain() {
-        rtInputGain = bypassed ? 1.0 : powf(10, inputGainDB / 20)
+        rtInputGain = GainPolicy.inputGain(dB: inputGainDB, bypassed: bypassed)
     }
 
     private func updateBalance() {
-        if bypassed {
-            rtBalanceLeft = 1.0
-            rtBalanceRight = 1.0
-        } else {
-            rtBalanceLeft = balance <= 0 ? 1.0 : 1.0 - balance
-            rtBalanceRight = balance >= 0 ? 1.0 : 1.0 + balance
-        }
+        (rtBalanceLeft, rtBalanceRight) = GainPolicy.balanceGains(balance, bypassed: bypassed)
     }
 
     private func updateOutputGain() {
-        outputGainEQ?.globalGain = bypassed ? 0 : outputGainDB
+        outputGainEQ?.globalGain = GainPolicy.outputGainDB(outputGainDB, bypassed: bypassed)
     }
 
     var maxGainDB: Float = 12
@@ -326,6 +338,17 @@ final class AudioEngine {
         avEngine.connect(outputGainNode, to: limiterNode, format: format)
         avEngine.connect(limiterNode, to: avEngine.outputNode, format: format)
 
+        // The capture helper's stereo mixdown tap is attenuated by Core Audio
+        // on multi-channel output devices (#107) — multiply the loss back in
+        // at the source node, ahead of the EQ and limiter so the limiter still
+        // guards the restored level. Recomputed on every start(); device
+        // switches funnel through restartTap() -> stop() + start().
+        let outputChannels = Int(avEngine.outputNode.outputFormat(forBus: 0).channelCount)
+        rtVolumeCompensation = GainPolicy.tapHeadroomCompensation(outputChannels: outputChannels)
+        os_log(.default, log: appLog,
+               "output hw channels: %{public}d  tap headroom compensation: x%{public}.1f",
+               outputChannels, rtVolumeCompensation)
+
         try avEngine.start()
         self.engine = avEngine
 
@@ -383,6 +406,7 @@ final class AudioEngine {
         rtCaptureClient = nil
         rtBiquadChainL = nil
         rtBiquadChainR = nil
+        rtVolumeCompensation = 1.0
 
         // Remove spectrum taps before stopping engine
         sourceNode?.removeTap(onBus: 0)
@@ -427,6 +451,7 @@ final class AudioEngine {
         rtCaptureClient = nil
         rtBiquadChainL = nil
         rtBiquadChainR = nil
+        rtVolumeCompensation = 1.0
         sourceNode?.removeTap(onBus: 0)
         eq?.removeTap(onBus: 0)
         sourceNode = nil

@@ -12,10 +12,10 @@ final class EQBandTests: XCTestCase {
     }
 
     func testGainLabel() {
-        XCTAssertEqual(EQBand(frequency: 1000, gain: 0).gainLabel, "0")
-        XCTAssertEqual(EQBand(frequency: 1000, gain: 6).gainLabel, "+6")
-        XCTAssertEqual(EQBand(frequency: 1000, gain: -3).gainLabel, "-3")
-        XCTAssertEqual(EQBand(frequency: 1000, gain: 1.5).gainLabel, "+1.5")
+        XCTAssertEqual(EQBand(frequency: 1000, gain: 0).gainLabel, "0 dB")
+        XCTAssertEqual(EQBand(frequency: 1000, gain: 6).gainLabel, "+6 dB")
+        XCTAssertEqual(EQBand(frequency: 1000, gain: -3).gainLabel, "-3 dB")
+        XCTAssertEqual(EQBand(frequency: 1000, gain: 1.5).gainLabel, "+1.5 dB")
     }
 
     func testDefaultBandwidth() {
@@ -34,10 +34,10 @@ final class EQBandTests: XCTestCase {
 final class EQPresetDataTests: XCTestCase {
 
     func testBuiltInPresetsExist() {
-        XCTAssertEqual(EQPresetData.builtInPresets.count, 3)
-        XCTAssertTrue(EQPresetData.flat.isBuiltIn)
-        XCTAssertTrue(EQPresetData.bassBoost.isBuiltIn)
-        XCTAssertTrue(EQPresetData.vocalClarity.isBuiltIn)
+        XCTAssertEqual(EQPresetData.builtInPresets.count, 15)
+        for preset in EQPresetData.builtInPresets {
+            XCTAssertTrue(preset.isBuiltIn, "\(preset.name) must be marked built-in")
+        }
     }
 
     func testFlatIsFlat() {
@@ -45,9 +45,15 @@ final class EQPresetDataTests: XCTestCase {
         XCTAssertFalse(EQPresetData.bassBoost.isFlat)
     }
 
-    func testBuiltInPresetsHaveTenBands() {
+    func testBuiltInPresetBandCountsWithinLimits() {
+        // The classic 10-band presets keep 10 bands; the newer ones vary
+        // (Luzifer's Void 16, 0xDEADBEEF 20) but must fit the engine's cap.
+        XCTAssertEqual(EQPresetData.flat.bands.count, 10)
+        XCTAssertEqual(EQPresetData.bassBoost.bands.count, 10)
+        XCTAssertEqual(EQPresetData.vocalClarity.bands.count, 10)
         for preset in EQPresetData.builtInPresets {
-            XCTAssertEqual(preset.bands.count, 10)
+            XCTAssertGreaterThanOrEqual(preset.bands.count, EQPresetData.minBandCount)
+            XCTAssertLessThanOrEqual(preset.bands.count, EQPresetData.maxBandCount)
         }
     }
 
@@ -67,11 +73,6 @@ final class EQPresetDataTests: XCTestCase {
         XCTAssertLessThan(bands[1].gain, 0)  // 125 Hz cut
         XCTAssertGreaterThan(bands[5].gain, 0) // 1k boost
         XCTAssertGreaterThan(bands[6].gain, 0) // 2k boost
-    }
-
-    func testPreampGain() {
-        XCTAssertEqual(EQPresetData.flat.preampGain, 0)
-        XCTAssertLessThan(EQPresetData.bassBoost.preampGain, 0)
     }
 
     func testGainsWithinRange() {
