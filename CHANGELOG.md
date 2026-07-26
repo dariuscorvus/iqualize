@@ -2,6 +2,14 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.48.1] - 2026-07-26
+
+### Fixed
+- Playback through iQualize was much quieter than without it on multi-channel output devices — -6 dB on 4-channel interfaces, -9.5 dB on 6-channel devices like MacBook Pro speakers, -12 dB on 8-channel. Core Audio attenuates the capture tap's stereo mixdown by the output device's stereo-pair count for headroom; the lost gain is now multiplied back in at the source node, ahead of the EQ and limiter. Stereo devices are unaffected. Reported with the diagnosis and verified on a 4-channel Audient iD4 MKII by @iv-re (#107)
+
+### Changed
+- Re-enabled the SPM test target (`swift test`, needs full Xcode): fixed the stale preset/state tests and added coverage for the new tap-headroom compensation, the Bypass gain neutralization from #118, and the render callback's deinterleave/gain math. Added an end-to-end BlackHole loopback harness (`Spikes/TapAttenuationE2E`) that measures the OS tap attenuation and verifies unity through the app
+
 ## [0.48.0] - 2026-07-25
 
 ### Added

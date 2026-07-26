@@ -60,12 +60,13 @@ let package = Package(
                 .linkedFramework("AudioToolbox"),
             ]
         ),
-        // Requires Xcode (not just Command Line Tools) for XCTest
-        // .testTarget(
-        //     name: "iQualizeTests",
-        //     dependencies: ["iQualize"],
-        //     path: "Tests/iQualizeTests"
-        // ),
+        // Needs full Xcode for XCTest — Command Line Tools alone can't build
+        // the test bundle.
+        .testTarget(
+            name: "iQualizeTests",
+            dependencies: ["iQualize"],
+            path: "Tests/iQualizeTests"
+        ),
     ],
     swiftLanguageModes: [.v6]
 )
