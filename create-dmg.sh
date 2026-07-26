@@ -9,7 +9,24 @@ DMG_NAME="iQualize-${VERSION}.dmg"
 DMG_VOLUME="iQualize"
 
 echo "=== Building iQualize v${VERSION} ==="
+# Distributable DMGs are universal (Apple Silicon + Intel) unless overridden
+# with IQ_UNIVERSAL=0 for a quick local test build.
+export IQ_UNIVERSAL="${IQ_UNIVERSAL:-1}"
 bash install.sh
+
+if [ "$IQ_UNIVERSAL" = "1" ]; then
+    for bin in \
+        /Applications/iQualize.app/Contents/MacOS/iQualize \
+        /Applications/iQualize.app/Contents/Helpers/iQualizeCapture \
+        /Applications/iQualize.app/Contents/Resources/bin/iqualize; do
+        archs=$(lipo -archs "$bin")
+        case "$archs" in
+            *x86_64*arm64*|*arm64*x86_64*) ;;
+            *) echo "ERROR: $bin is not universal (archs: $archs)"; exit 1 ;;
+        esac
+    done
+    echo "Universal check passed (arm64 + x86_64 in all three binaries)"
+fi
 
 echo "=== Creating DMG ==="
 

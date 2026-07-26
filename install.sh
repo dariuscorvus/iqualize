@@ -4,25 +4,38 @@ set -e
 
 cd "$(dirname "$0")"
 
-# Pick a signing identity: a real Apple Development cert if one is installed,
-# otherwise ad-hoc ("-"). Ad-hoc is fine for local dev — TCC keys on the cdhash,
-# which stays stable across rebuilds when the binary is unchanged. It is NOT
-# accepted by Gatekeeper on quarantined downloads (macOS reports "damaged"), so
-# distributed DMGs still need the quarantine xattr stripped — see README.
+# Pick a signing identity: an explicit IQ_SIGN_IDENTITY (release CI sets this
+# to a Developer ID cert when configured), else a real Apple Development cert
+# if one is installed, otherwise ad-hoc ("-"). Ad-hoc is fine for local dev —
+# TCC keys on the cdhash, which stays stable across rebuilds when the binary is
+# unchanged. It is NOT accepted by Gatekeeper on quarantined downloads (macOS
+# reports "damaged"), so distributed DMGs still need the quarantine xattr
+# stripped — see README.
 # Previously this always passed "Apple Development"; when that cert is absent the
 # codesign call failed silently and the app shipped with a broken signature.
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "Apple Development"; then
+if [ -n "${IQ_SIGN_IDENTITY:-}" ]; then
+    SIGN_ID="$IQ_SIGN_IDENTITY"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Apple Development"; then
     SIGN_ID="Apple Development"
 else
     SIGN_ID="-"
 fi
 
-echo "Building iQualize..."
-swift build -c release 2>&1 | tail -5
+# IQ_UNIVERSAL=1 builds both slices (Apple Silicon + Intel) — used for
+# distributable DMGs (create-dmg.sh). Default dev builds stay native-only:
+# the x86_64 slice roughly doubles compile time for nothing during iteration.
+BUILD_FLAGS=(-c release)
+if [ "${IQ_UNIVERSAL:-0}" = "1" ]; then
+    BUILD_FLAGS+=(--arch arm64 --arch x86_64)
+    echo "Building iQualize (universal: arm64 + x86_64)..."
+else
+    echo "Building iQualize..."
+fi
+swift build "${BUILD_FLAGS[@]}" 2>&1 | tail -5
 
 APP=/Applications/iQualize.app
 BIN="$APP/Contents/MacOS/iQualize"
-BIN_PATH="$(swift build -c release --show-bin-path)"
+BIN_PATH="$(swift build "${BUILD_FLAGS[@]}" --show-bin-path)"
 SRC="$BIN_PATH/iQualize"
 CLI_SRC="$BIN_PATH/iqualize-cli"
 CLI_BIN="$APP/Contents/Resources/bin/iqualize"
