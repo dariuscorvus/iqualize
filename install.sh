@@ -46,22 +46,40 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Help
 
 NEEDS_RESIGN=0
 
+# Change detection: installed binaries never byte-match fresh build products,
+# because signing rewrites them — the helper individually below, the main
+# binary when the bundle seal is applied — so cmp against the installed copy
+# always reports a change. Instead, compare each fresh product against the
+# hash recorded at the previous install (build-hashes sidecar, sealed into the
+# bundle). TCC does not depend on this skip: it pins the cdhash, which is
+# deterministic when the product is unchanged and changes with any real code
+# update regardless. What the skip buys is a truthful no-op — in particular it
+# never rewrites the executable of a running app, which macOS punishes with
+# SIGKILL.
+HASHES="$APP/Contents/Resources/build-hashes"
+hash_of() { shasum -a 256 "$1" | cut -d' ' -f1; }
+recorded() { grep "^$1=" "$HASHES" 2>/dev/null | cut -d= -f2; }
+MAIN_HASH=$(hash_of "$SRC")
+HELPER_HASH=$(hash_of "$HELPER_SRC")
+CLI_HASH=$(hash_of "$CLI_SRC")
+
 # Install + sign the capture helper FIRST (the main binary's enclosing
 # signature covers the helper, so the helper must already be in place when
 # we sign the main bundle below). It owns the CATap + aggregate IOProc in a
-# separate process — see CONTINUITY.md.
-if [ -f "$HELPER_BIN" ] && cmp -s "$HELPER_SRC" "$HELPER_BIN"; then
+# separate process — see CONTINUITY.md. The explicit --identifier matters:
+# without it, codesign derives one from the Mach-O UUID, which changes on
+# every relink and would break a cert-based TCC grant across rebuilds.
+if [ -f "$HELPER_BIN" ] && [ "$HELPER_HASH" = "$(recorded helper)" ]; then
     :
 else
     cp -f "$HELPER_SRC" "$HELPER_BIN"
-    codesign --force --sign "$SIGN_ID" --entitlements iQualizeCapture.entitlements "$HELPER_BIN" && echo "Helper signed ($SIGN_ID)"
+    codesign --force --sign "$SIGN_ID" --identifier com.iqualize.capture --entitlements iQualizeCapture.entitlements "$HELPER_BIN" && echo "Helper signed ($SIGN_ID)"
     NEEDS_RESIGN=1
     echo "Helper binary updated"
 fi
 
-# Only replace binary if it actually changed — preserves TCC permissions (cdhash stays the same)
-if [ -f "$BIN" ] && cmp -s "$SRC" "$BIN"; then
-    echo "Binary unchanged — skipping copy (TCC permissions preserved)"
+if [ -f "$BIN" ] && [ "$MAIN_HASH" = "$(recorded main)" ]; then
+    echo "Binary unchanged — skipping copy"
 else
     cp -f "$SRC" "$BIN"
     NEEDS_RESIGN=1
@@ -69,7 +87,7 @@ else
 fi
 
 # Bundle the CLI so it rides along in the DMG too (see Settings > "Install Command Line Tool")
-if [ -f "$CLI_BIN" ] && cmp -s "$CLI_SRC" "$CLI_BIN"; then
+if [ -f "$CLI_BIN" ] && [ "$CLI_HASH" = "$(recorded cli)" ]; then
     :
 else
     cp -f "$CLI_SRC" "$CLI_BIN"
@@ -105,6 +123,9 @@ cp -f "$STAMPED_PLIST" "$APP/Contents/Info.plist"
 rm -f "$STAMPED_PLIST"
 
 if [ "$NEEDS_RESIGN" = "1" ]; then
+    # Record the pre-sign product hashes first so the sidecar is covered by
+    # the bundle seal.
+    printf 'helper=%s\nmain=%s\ncli=%s\n' "$HELPER_HASH" "$MAIN_HASH" "$CLI_HASH" > "$HASHES"
     # Sign the whole bundle after every resource is in place so the sealed
     # CodeResources is consistent (a partial/stale seal reads as "damaged").
     codesign --force --sign "$SIGN_ID" --entitlements iQualize.entitlements "$APP" && echo "Signed with: $SIGN_ID"

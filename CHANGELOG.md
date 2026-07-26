@@ -2,10 +2,16 @@
 
 All notable changes to iQualize will be documented in this file.
 
-## [0.51.0] - 2026-07-26
+## [0.51.0] - 2026-07-27
 
 ### Added
 - `iqualize status` now reports the app version and build commit as its first line (`Version: 0.51.0 (abc1234)`), read live from the running app over the control socket. A new `iqualize version` subcommand prints just `0.51.0 (abc1234)`. The About dialog shows the same. install.sh stamps the commit into the installed app's Info.plist (`IQGitCommit`, with a `-dirty` suffix for uncommitted changes); builds without git omit it. Suggested by Gary (@nordicdata, #136)
+
+## [0.50.1] - 2026-07-26
+
+### Fixed
+- `install.sh` claimed to skip unchanged binaries but re-copied and re-signed on every run: it compared fresh build products against installed binaries that signing had already rewritten (the capture helper individually, the main binary via the bundle seal), so they never byte-matched again. Change detection now compares against hashes of the pre-sign build products, recorded in a `build-hashes` sidecar sealed into the bundle. TCC was unaffected either way — ad-hoc grants pin the cdhash, which is deterministic for an unchanged product — but a no-op install no longer rewrites the executable of a running app
+- The capture helper is now signed with an explicit identifier (`com.iqualize.capture`). Without one, codesign derives an identifier from the Mach-O UUID, which changes on every relink and would break a cert-based TCC grant across rebuilds
 
 ## [0.50.0] - 2026-07-26
 

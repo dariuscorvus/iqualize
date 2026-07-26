@@ -42,7 +42,7 @@ When closing a task via PR, use "Fixes #N" in the PR body to auto-close the issu
 ## Build & Install
 
 ```bash
-bash install.sh          # builds, signs with Apple Development cert, installs to /Applications
+bash install.sh          # builds, signs, installs to /Applications
 open /Applications/iQualize.app
 ```
 
@@ -50,8 +50,8 @@ open /Applications/iQualize.app
 
 - Build with `swift build` (SPM, no Xcode project)
 - After code changes: `pkill -x iQualize; bash install.sh && open /Applications/iQualize.app`
-- Binary is codesigned with "Apple Development" cert to preserve TCC permissions across rebuilds
-- install.sh skips binary copy if unchanged (preserves cdhash)
+- install.sh signs with `IQ_SIGN_IDENTITY` if set, else an installed "Apple Development" cert, else ad-hoc. Ad-hoc TCC grants pin the cdhash: no-op reinstalls keep it (the re-sign is deterministic), but any real code change gets a fresh TCC prompt — only a cert-based signature survives those
+- install.sh skips binary copies when the fresh build products match the hashes recorded in `Contents/Resources/build-hashes` at the last install. Installed binaries themselves never byte-match a fresh product — signing rewrites them — so don't compare against those
 
 ### Launch verification (REQUIRED)
 
