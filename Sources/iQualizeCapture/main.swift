@@ -51,6 +51,12 @@ nonisolated(unsafe) var tapDescription: AnyObject?
 nonisolated(unsafe) var baseExcludedObjects: [AudioObjectID] = []
 nonisolated(unsafe) var excludedMicUsers: Set<AudioObjectID> = []
 nonisolated(unsafe) var micPollTimer: DispatchSourceTimer?
+/// Process objects seen at the last poll, for spotting newly-launched apps (#140).
+nonisolated(unsafe) var knownProcessObjects: Set<AudioObjectID> = []
+/// Newly-appeared processes still being watched for output, and the polls each has
+/// left. A process registers with the HAL before it starts playing, so checking
+/// once at appearance would miss nearly everyone.
+nonisolated(unsafe) var pendingNewProcesses: [AudioObjectID: Int] = [:]
 
 // MARK: - Helpers
 
@@ -200,6 +206,55 @@ func applyTapExclusions() {
         os_log(.error, log: capLog, "tap description update failed: OSStatus %{public}d", err)
     }
 }
+
+/// Refresh the live tap when a newly-launched app starts playing.
+///
+/// A global tap is supposed to cover processes that start after it was created, but
+/// #87 saw a late-launched app end up muted with its audio silently dropped rather
+/// than routed. The main app used to fix that by restarting the whole tap, which
+/// tore down this helper and spliced ~100 ms of silence into playback (#140). Setting
+/// kAudioTapPropertyDescription on the live tap re-resolves it in place instead —
+/// verified returning noErr here in the helper, with the IOProc running.
+///
+/// Only newly-appeared processes that actually start playing trigger a refresh.
+/// Most process objects never play — measured 5 of 7 over a 30 s window — and every
+/// description update churns the live tap, so refreshing on bare list growth would
+/// trade a rare dropout for constant churn.
+@available(macOS 14.2, *)
+func pollNewOutputProcesses() {
+    let current = Set(processObjectList())
+    let firstPass = knownProcessObjects.isEmpty
+    for appeared in current.subtracting(knownProcessObjects) {
+        pendingNewProcesses[appeared] = newProcessWatchPolls
+    }
+    knownProcessObjects = current
+    // run() seeds the tap against the processes alive at creation, so the first
+    // poll's "new" processes are just that baseline.
+    if firstPass { pendingNewProcesses.removeAll(); return }
+
+    var startedOutput: [AudioObjectID] = []
+    for (obj, pollsLeft) in pendingNewProcesses {
+        guard current.contains(obj) else { pendingNewProcesses[obj] = nil; continue }
+        if processFlag(obj, kAudioProcessPropertyIsRunningOutput) {
+            pendingNewProcesses[obj] = nil
+            startedOutput.append(obj)
+        } else if pollsLeft <= 1 {
+            pendingNewProcesses[obj] = nil
+        } else {
+            pendingNewProcesses[obj] = pollsLeft - 1
+        }
+    }
+    guard !startedOutput.isEmpty else { return }
+
+    applyTapExclusions()
+    for obj in startedOutput {
+        os_log(.default, log: capLog,
+               "new output process %{public}@ — tap refreshed in place", processLogName(obj))
+    }
+}
+
+/// How long a new process stays under observation, in poll ticks (1 s each).
+let newProcessWatchPolls = 8
 
 @available(macOS 14.2, *)
 func pollMicUsers() {
@@ -449,12 +504,17 @@ func run() {
     }
     stdinThread.start()
 
-    // 8. Watch for processes starting/stopping mic use (calls) and update
-    //    the tap's exclusion list live (#131). dispatchMain() below services
-    //    the main queue.
+    // 8. Watch for processes starting/stopping mic use (calls) and update the tap's
+    //    exclusion list live (#131), and for newly-launched apps starting playback,
+    //    refreshing the tap in place rather than restarting it (#140).
+    //    dispatchMain() below services the main queue.
+    knownProcessObjects = Set(processObjectList())
     let timer = DispatchSource.makeTimerSource(queue: .main)
     timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
-    timer.setEventHandler { pollMicUsers() }
+    timer.setEventHandler {
+        pollMicUsers()
+        pollNewOutputProcesses()
+    }
     timer.resume()
     micPollTimer = timer
 }

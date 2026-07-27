@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.51.2] - 2026-07-27
+
+### Fixed
+- Launching an app while the EQ ran splices ~100 ms of silence into playback — the momentary lag when Discord starts. The new-process watcher added for #87 restarted the tap on *any* new Core Audio process object, and a restart is a full teardown of the capture helper, tap, aggregate, ring buffer and audio graph. The capture helper now refreshes the live tap in place instead, by re-setting its description on the 1 s timer it already runs for call exclusions, and the restart path is gone. New processes that never play audio no longer cost anything either — 5 of 7 did not over a 30 s sample (#140)
+
 ## [0.51.1] - 2026-07-27
 
 ### Changed
