@@ -17,6 +17,12 @@ final class DreamViewModel {
     @ObservationIgnored
     weak var undoManager: UndoManager?
 
+    /// The EQ window itself — set by DreamHostingView once the window exists, so
+    /// DreamRootView can apply the theme override to the right window directly
+    /// instead of guessing at it via NSApp.windows.
+    @ObservationIgnored
+    weak var window: NSWindow?
+
     /// Callback fired when the toolbar's Settings gear is tapped.
     @ObservationIgnored
     var onOpenSettings: (() -> Void)?

@@ -23,6 +23,7 @@ enum DreamHostingView {
 
         // Wire window's UndoManager into the view model
         viewModel.undoManager = window.undoManager
+        viewModel.window = window
 
         let host = NSHostingView(rootView: DreamRootView(vm: viewModel))
         host.translatesAutoresizingMaskIntoConstraints = false

@@ -8,6 +8,14 @@ struct DreamRootView: View {
 
     var body: some View {
         let resolvedScheme: ColorScheme = vm.theme.colorScheme ?? systemScheme
+        // Must run before `theme` below: DreamTheme.bgWindow/bgToolbar/bgCanvas resolve
+        // via Color(nsColor:), which reads the *window's* actual NSAppearance at draw
+        // time, not this view's `scheme`/environment. Applying the override inside a
+        // .onChange/.onAppear side effect fires one render late — SwiftUI had already
+        // resolved this render's NSColors against the *old* appearance by the time the
+        // side effect landed, so those surfaces stayed on the previous appearance while
+        // the scheme-driven (hardcoded RGB) colors below switched immediately (#144).
+        let _ = applyWindowAppearance()
         let theme = DreamTheme(scheme: resolvedScheme)
 
         VStack(spacing: 0) {
@@ -26,19 +34,18 @@ struct DreamRootView: View {
         .background(theme.bgWindow)
         .environment(\.dreamTheme, theme)
         .preferredColorScheme(vm.theme.colorScheme)
-        .onAppear { applyWindowAppearance(scheme: resolvedScheme) }
-        .onChange(of: vm.theme) { _, _ in applyWindowAppearance(scheme: vm.theme.colorScheme ?? systemScheme) }
-        .onChange(of: systemScheme) { _, _ in
-            if vm.theme == .auto { applyWindowAppearance(scheme: systemScheme) }
-        }
         .background(
             KeyEventHandler(vm: vm)
         )
     }
 
-    private func applyWindowAppearance(scheme: ColorScheme) {
-        // Force the NSWindow's traffic-light/chrome appearance to match.
-        guard let window = NSApp.windows.first(where: { $0.title.isEmpty || $0.title.contains("iQualize") }) else { return }
+    // Force the NSWindow's traffic-light/chrome/system-color appearance to match the
+    // chosen theme. Uses the window set directly by DreamHostingView rather than
+    // searching NSApp.windows — that search matched any window titled "iQualize ..."
+    // (e.g. Help) or with an empty title (e.g. a status-item window), and could
+    // silently restyle the wrong one (#144).
+    private func applyWindowAppearance() {
+        guard let window = vm.window else { return }
         switch vm.theme {
         case .auto:
             window.appearance = nil

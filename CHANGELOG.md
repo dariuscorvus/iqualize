@@ -2,6 +2,19 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.51.4] - 2026-07-29
+
+### Fixed
+- The EQ window didn't fully restyle when its theme (Settings → Theme) disagreed with the system-wide appearance: text and accents switched immediately, but the window background and axis labels stayed on the old appearance, sometimes leaving light text on a light background or vice versa. `DreamRootView` looked up the window to restyle via `NSApp.windows.first(where: title contains "iQualize" or empty)`, which could silently match the Help window or a status-item window instead of the EQ window itself — it now uses a direct reference set by `DreamHostingView` when the window is created. Applying that override also moved from an `.onChange`/`.onAppear` side effect into the view's `body`, since the old timing applied the appearance one render after SwiftUI had already resolved that render's system colors against the previous one. Reported by Gary (@nordicdata, #144)
+
+### Added
+- README now documents the GUI path (System Settings → Privacy & Security → Security → Open Anyway) for allowing iQualize's unsigned build, for anyone not comfortable running the `xattr` command. Suggested by Gary (@nordicdata, #144)
+
+## [0.51.3] - 2026-07-29
+
+### Fixed
+- `install.sh` could ship `Info.plist` mode `0600` inside the DMG: the temp file used for build-commit stamping is created by `mktemp` (`0600`), and `cp` onto a not-yet-existing destination inherits the source mode — the case on a fresh CI runner building a release. Root-run install scripts that copy the app straight out of the DMG got an unreadable plist, which silenced the system audio recording permission prompt and left iQualize running with no audio output. `install.sh` now `chmod`s the installed plist to `644` after copying it in. Reported by @json20 (#142)
+
 ## [0.51.2] - 2026-07-27
 
 ### Fixed
