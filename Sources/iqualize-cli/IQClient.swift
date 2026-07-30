@@ -56,7 +56,10 @@ enum IQClient {
         }
         guard connectResult == 0 else { throw IQClientError.appNotReachable }
 
-        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        // 30s, not 5 — the OPRA catalog search/import commands do a real network fetch on a
+        // cache miss. A longer timeout costs nothing for fast commands; the response arrives
+        // as soon as it's ready regardless of how long we're willing to wait.
+        var timeout = timeval(tv_sec: 30, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
         let data = try JSONEncoder().encode(request)

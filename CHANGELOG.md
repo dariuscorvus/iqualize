@@ -2,6 +2,16 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.52.0] - 2026-07-30
+
+### Added
+- CLI parity for the rest of #122: EQ band editing (`iqualize band list/add/set/delete/move/mute`, addressed by `--index` or nearest-frequency `--near`), preset lifecycle (`presets save/reset/new/rename/duplicate/favorite/pin/unpin`), hidden built-in presets (`presets hidden/restore`), file import/export (`presets import/export`, same AutoEQ/OPRA/iQualize formats and formats the GUI already parses), and the OPRA community catalog (`presets opra search/import`). All band/preset mutations against a built-in preset auto-fork and persist immediately, matching the existing `gain`/`limiter` CLI commands rather than the GUI's Save-As name prompt. Mute is non-destructive — a muted band's gain is preserved and unaffected in `band list`, unlike the GUI's own mute which zeroes gain in a transient copy (`AudioEngine.applyBands` now respects `.muted` at the DSP layer via `effectiveGain(_:)` instead). Import/export require an explicit `--overwrite` on a name collision rather than silently renaming. `iqualize tldr` documents every new command with examples.
+- OPRA catalog search/import can involve a real network fetch on a cache miss — this no longer blocks other CLI commands from getting an immediate response while it's in flight, and the CLI's response timeout is now 30s (was 5s) to give it room to complete.
+- Every command and subcommand now has its own scoped tldr, e.g. `iqualize presets tldr` (router-level commands) or `iqualize bypass tldr` (commands with an on/off/toggle argument show tldr as a fourth value; commands with a free-form or numeric argument take a `--tldr` flag instead, to avoid colliding with real argument values).
+
+### Fixed
+- `PresetStore.pinPreset` had no check that the target preset actually exists — closed at the new CLI `presets pin` call site (the GUI's own pin button was never affected, since it only ever pins the already-active preset).
+
 ## [0.51.5] - 2026-07-30
 
 ### Fixed

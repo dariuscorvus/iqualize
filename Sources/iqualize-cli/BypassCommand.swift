@@ -5,10 +5,10 @@ struct Bypass: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "bypass", abstract: "Get or set EQ bypass.")
 
     enum Action: String, ExpressibleByArgument, CaseIterable {
-        case on, off, toggle
+        case on, off, toggle, tldr
     }
 
-    @Argument(help: "on, off, or toggle. Omit to just print the current state.")
+    @Argument(help: "on, off, toggle, or tldr. Omit to just print the current state.")
     var action: Action?
 
     func run() {
@@ -22,6 +22,9 @@ struct Bypass: ParsableCommand {
             response = requireOK(sendOrExit(CLIRequest(command: CLICommand.setBypass, boolArg: false)))
         case .toggle:
             response = requireOK(sendOrExit(CLIRequest(command: CLICommand.toggleBypass)))
+        case .tldr:
+            printTldr(matching: "bypass")
+            return
         }
         print("Bypass: \(response.status?.bypassed == true ? "on" : "off")")
     }

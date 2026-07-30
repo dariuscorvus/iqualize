@@ -793,7 +793,7 @@ final class DreamViewModel {
             do {
                 let data = try Data(contentsOf: url)
                 let parsed = try PresetImporter.parse(data: data, filename: url.lastPathComponent)
-                let suggestedName = parsed.name ?? Self.defaultImportName(for: url)
+                let suggestedName = parsed.name ?? PresetImporter.defaultImportName(for: url)
                 if let saved = saveImportedPreset(parsed, suggestedName: suggestedName) {
                     lastImported = saved
                 }
@@ -866,15 +866,7 @@ final class DreamViewModel {
             presetStore.deleteCustomPreset(id: existing.id)
         }
 
-        let preset = EQPresetData(
-            id: UUID(),
-            name: importName,
-            bands: parsed.bands,
-            rightBands: parsed.rightBands,
-            isBuiltIn: false,
-            inputGainDB: parsed.inputGainDB,
-            outputGainDB: parsed.outputGainDB
-        )
+        let preset = PresetImporter.makePreset(from: parsed, name: importName)
         presetStore.saveCustomPreset(preset)
         return preset
     }
@@ -910,19 +902,6 @@ final class DreamViewModel {
             alert.informativeText = "Failed to import \(product.vendorName) \(product.productName): \(error.localizedDescription)"
             alert.runModal()
         }
-    }
-
-    /// Derives a default preset name from an imported file's name, stripping AutoEQ's
-    /// conventional " ParametricEQ"/" GraphicEQ" filename suffix if present so e.g.
-    /// "Sennheiser HD 600 ParametricEQ.txt" defaults to "Sennheiser HD 600".
-    private static func defaultImportName(for url: URL) -> String {
-        let base = url.deletingPathExtension().lastPathComponent
-        for suffix in [" ParametricEQ", " GraphicEQ"] {
-            if base.range(of: suffix, options: [.caseInsensitive, .anchored, .backwards]) != nil {
-                return String(base.dropLast(suffix.count))
-            }
-        }
-        return base
     }
 
     /// Runs an AppleScript snippet via /usr/bin/osascript, returns trimmed stdout or nil.

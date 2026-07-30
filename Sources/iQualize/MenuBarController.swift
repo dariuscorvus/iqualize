@@ -33,8 +33,10 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
             presetStore?.pinnedPreset(forDeviceUID: uid)
         }
 
-        // Restore saved state and always start EQ — a device pin for the current output
-        // takes priority over the last-selected preset, since it's an explicit user choice.
+        // Restore saved state — a device pin for the current output takes priority over
+        // the last-selected preset, since it's an explicit user choice. Capture starts per
+        // the persisted captureEnabled flag (defaults true, so fresh/existing installs
+        // still always start; only an explicit `iqualize capture off` persists false).
         audioEngine.gainIsGlobal = state.linkGainGlobally
         let startupPreset = audioEngine.outputDeviceUID
             .flatMap { presetStore.pinnedPreset(forDeviceUID: $0) }
@@ -56,7 +58,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
             audioEngine.inputGainDB = state.inputGainDB
             audioEngine.outputGainDB = state.outputGainDB
         }
-        audioEngine.setEnabled(true)
+        audioEngine.setEnabled(state.captureEnabled)
         updateIcon()
 
         // Restore EQ window if it was open when the app last quit
@@ -366,12 +368,545 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         eqWindowController?.syncBalance(clamped)
     }
 
+    func setPeakLimiter(_ enabled: Bool) {
+        audioEngine.peakLimiter = enabled
+        var s = iQualizeState.load()
+        s.peakLimiter = enabled
+        s.save()
+        eqWindowController?.syncPeakLimiter(enabled)
+    }
+
+    @discardableResult
+    func togglePeakLimiter() -> Bool {
+        let newValue = !audioEngine.peakLimiter
+        setPeakLimiter(newValue)
+        return newValue
+    }
+
+    /// Mirrors SettingsWindowController.toggleLinkGainGlobally(_:) verbatim — forks the
+    /// active preset on the global -> per-preset transition so it survives a relaunch.
+    func setGainIsGlobal(_ global: Bool) {
+        var s = iQualizeState.load()
+        if global {
+            s.inputGainDB = audioEngine.inputGainDB
+            s.outputGainDB = audioEngine.outputGainDB
+            s.linkGainGlobally = true
+            s.save()
+            audioEngine.gainIsGlobal = true
+        } else {
+            audioEngine.gainIsGlobal = false
+            var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+            preset.inputGainDB = audioEngine.inputGainDB
+            preset.outputGainDB = audioEngine.outputGainDB
+            presetStore.saveCustomPreset(preset)
+            audioEngine.activePreset = preset
+            s.linkGainGlobally = false
+            s.save()
+        }
+        eqWindowController?.syncGainIsGlobal(audioEngine.gainIsGlobal)
+        eqWindowController?.syncUIToPreset()
+    }
+
+    @discardableResult
+    func toggleGainIsGlobal() -> Bool {
+        let newValue = !audioEngine.gainIsGlobal
+        setGainIsGlobal(newValue)
+        return newValue
+    }
+
+    // preEqSpectrumEnabled/postEqSpectrumEnabled live only in iQualizeState, not on
+    // AudioEngine — the toggle variants read the current value from persisted state
+    // rather than from audioEngine, unlike peakLimiter/gainIsGlobal/capture.
+    func setPreEqSpectrum(_ enabled: Bool) {
+        var s = iQualizeState.load()
+        s.preEqSpectrumEnabled = enabled
+        s.save()
+        eqWindowController?.syncPreEqSpectrum(enabled)
+    }
+
+    @discardableResult
+    func togglePreEqSpectrum() -> Bool {
+        let newValue = !iQualizeState.load().preEqSpectrumEnabled
+        setPreEqSpectrum(newValue)
+        return newValue
+    }
+
+    func setPostEqSpectrum(_ enabled: Bool) {
+        var s = iQualizeState.load()
+        s.postEqSpectrumEnabled = enabled
+        s.save()
+        eqWindowController?.syncPostEqSpectrum(enabled)
+    }
+
+    @discardableResult
+    func togglePostEqSpectrum() -> Bool {
+        let newValue = !iQualizeState.load().postEqSpectrumEnabled
+        setPostEqSpectrum(newValue)
+        return newValue
+    }
+
+    func setCapture(_ enabled: Bool) {
+        audioEngine.setEnabled(enabled)
+        var s = iQualizeState.load()
+        s.captureEnabled = enabled
+        s.save()
+        updateIcon()
+    }
+
+    @discardableResult
+    func toggleCapture() -> Bool {
+        let newValue = !audioEngine.isRunning
+        setCapture(newValue)
+        return newValue
+    }
+
+    // MARK: - CLI Support: Band editing
+
+    /// Resolves --index (1-based, sorted-by-frequency) or --near (nearest-frequency match)
+    /// against `preset`'s live bands. Exactly one must be non-nil (also validated client-side
+    /// in the CLI). Ties in --near resolve to the lower-frequency band via `min`'s stable
+    /// first-match behavior — no separate "ambiguous" error needed.
+    private func resolveBandID(index: Int?, matchFrequency: Float?, in preset: EQPresetData) throws -> UUID {
+        guard index != nil || matchFrequency != nil else {
+            throw CLIHandlerError(message: "specify --index or --near")
+        }
+        guard index == nil || matchFrequency == nil else {
+            throw CLIHandlerError(message: "specify only one of --index or --near")
+        }
+        let sorted = preset.bands.sorted { $0.frequency < $1.frequency }
+        guard !sorted.isEmpty else { throw CLIHandlerError(message: "preset has no bands") }
+        if let index {
+            guard index >= 1, index <= sorted.count else {
+                throw CLIHandlerError(message: "--index must be between 1 and \(sorted.count)")
+            }
+            return sorted[index - 1].id
+        }
+        return sorted.min { abs($0.frequency - matchFrequency!) < abs($1.frequency - matchFrequency!) }!.id
+    }
+
+    private func bandSummary(for band: EQBand, in preset: EQPresetData) -> CLIBandSummary {
+        let sorted = preset.bands.sorted { $0.frequency < $1.frequency }
+        let idx = (sorted.firstIndex { $0.id == band.id } ?? 0) + 1
+        return CLIBandSummary(index: idx, frequency: band.frequency, gain: band.gain,
+                               bandwidth: band.bandwidth, filterType: band.filterType.rawValue, muted: band.muted)
+    }
+
+    /// Same fork -> mutate -> push -> persist -> sync shape as setInputGain/setPeakLimiter.
+    private func persistBandMutation(_ preset: EQPresetData) {
+        audioEngine.activePreset = preset
+        presetStore.saveCustomPreset(preset)
+        var s = iQualizeState.load()
+        s.selectedPresetID = preset.id
+        s.save()
+        eqWindowController?.syncUIToPreset()
+    }
+
+    func listBands() -> [CLIBandSummary] {
+        let preset = audioEngine.activePreset
+        return preset.bands.sorted { $0.frequency < $1.frequency }.map { bandSummary(for: $0, in: preset) }
+    }
+
+    /// The 31-band cap is enforced here — AudioEngine.swift creates its AVAudioUnitEQ node
+    /// with a fixed numberOfBands: EQPresetData.maxBandCount (31) and indexes into it with no
+    /// bounds check, so a 32nd band would crash the audio engine. That gap is pre-existing and
+    /// not fixed here — this new code path simply never reaches it.
+    func addBand(frequency: Float?, gain: Float?, bandwidth: Float?, filterType: String?) throws -> CLIBandSummary {
+        var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        guard preset.bands.count < EQPresetData.maxBandCount else {
+            throw CLIHandlerError(message: "preset already has the maximum of \(EQPresetData.maxBandCount) bands")
+        }
+        let type: FilterType
+        if let filterType {
+            guard let parsed = FilterType(rawValue: filterType) else {
+                throw CLIHandlerError(message: "unrecognized filter type '\(filterType)'")
+            }
+            type = parsed
+        } else {
+            type = .parametric
+        }
+        let freq = frequency.map { max(20, min(20000, $0)) } ?? preset.suggestNewBandFrequency()
+        let newBand = EQBand(frequency: freq, gain: max(-24, min(24, gain ?? 0)),
+                              bandwidth: max(0.05, min(8.0, bandwidth ?? 1.0)), filterType: type)
+        preset.bands.append(newBand)
+        persistBandMutation(preset)
+        return bandSummary(for: newBand, in: preset)
+    }
+
+    func deleteBand(index: Int?, matchFrequency: Float?) throws {
+        var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        let id = try resolveBandID(index: index, matchFrequency: matchFrequency, in: preset)
+        guard preset.bands.count > EQPresetData.minBandCount else {
+            throw CLIHandlerError(message: "preset must keep at least \(EQPresetData.minBandCount) band")
+        }
+        preset.bands.removeAll { $0.id == id }
+        persistBandMutation(preset)
+    }
+
+    func setBand(index: Int?, matchFrequency: Float?, frequency: Float?, gain: Float?, bandwidth: Float?, filterType: String?) throws -> CLIBandSummary {
+        var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        let id = try resolveBandID(index: index, matchFrequency: matchFrequency, in: preset)
+        guard let i = preset.bands.firstIndex(where: { $0.id == id }) else {
+            throw CLIHandlerError(message: "band not found")
+        }
+        if let f = frequency { preset.bands[i].frequency = max(20, min(20000, f)) }
+        if let g = gain { preset.bands[i].gain = max(-24, min(24, g)) }
+        if let b = bandwidth { preset.bands[i].bandwidth = max(0.05, min(8.0, b)) }
+        if let t = filterType {
+            guard let parsed = FilterType(rawValue: t) else {
+                throw CLIHandlerError(message: "unrecognized filter type '\(t)'")
+            }
+            preset.bands[i].filterType = parsed
+        }
+        persistBandMutation(preset)
+        return bandSummary(for: preset.bands[i], in: preset)
+    }
+
+    /// Mirrors DreamViewModel.moveBandHorizontally(id:dir:) exactly: swaps FREQUENCY VALUES
+    /// with the adjacent band in sorted order — not an array reorder.
+    func moveBand(index: Int?, matchFrequency: Float?, direction: String) throws -> CLIBandSummary {
+        var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        let id = try resolveBandID(index: index, matchFrequency: matchFrequency, in: preset)
+        let sorted = preset.bands.sorted { $0.frequency < $1.frequency }
+        guard let idx = sorted.firstIndex(where: { $0.id == id }) else {
+            throw CLIHandlerError(message: "band not found")
+        }
+        let dir: Int
+        switch direction {
+        case "left": dir = -1
+        case "right": dir = 1
+        default: throw CLIHandlerError(message: "direction must be 'left' or 'right'")
+        }
+        let newIdx = idx + dir
+        guard newIdx >= 0, newIdx < sorted.count else {
+            throw CLIHandlerError(message: "band is already at the \(direction) edge")
+        }
+        let a = sorted[idx], b = sorted[newIdx]
+        for i in preset.bands.indices {
+            if preset.bands[i].id == a.id { preset.bands[i].frequency = b.frequency }
+            else if preset.bands[i].id == b.id { preset.bands[i].frequency = a.frequency }
+        }
+        persistBandMutation(preset)
+        guard let moved = preset.bands.first(where: { $0.id == id }) else {
+            throw CLIHandlerError(message: "band not found after move")
+        }
+        return bandSummary(for: moved, in: preset)
+    }
+
+    /// Only `.muted` is set — `.gain` is never touched, unlike the GUI's own mute path
+    /// (DreamViewModel.pushBandsToEngine zeroes gain in a transient copy while keeping the
+    /// real value in DreamViewModel.bands). The CLI has no such second copy, so zeroing the
+    /// stored gain here would lose it permanently; AudioEngine.applyBands' effectiveGain(_:)
+    /// respects `.muted` at the DSP layer instead.
+    func setBandMute(index: Int?, matchFrequency: Float?, muted: Bool) throws -> CLIBandSummary {
+        var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        let id = try resolveBandID(index: index, matchFrequency: matchFrequency, in: preset)
+        guard let i = preset.bands.firstIndex(where: { $0.id == id }) else {
+            throw CLIHandlerError(message: "band not found")
+        }
+        preset.bands[i].muted = muted
+        persistBandMutation(preset)
+        return bandSummary(for: preset.bands[i], in: preset)
+    }
+
+    @discardableResult
+    func toggleBandMute(index: Int?, matchFrequency: Float?) throws -> CLIBandSummary {
+        let preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        let id = try resolveBandID(index: index, matchFrequency: matchFrequency, in: preset)
+        guard let current = preset.bands.first(where: { $0.id == id })?.muted else {
+            throw CLIHandlerError(message: "band not found")
+        }
+        return try setBandMute(index: index, matchFrequency: matchFrequency, muted: !current)
+    }
+
+    // MARK: - CLI Support: Presets
+
     /// Resolves a preset by UUID string or case-insensitive exact name match.
     func resolvePreset(idOrName: String) -> EQPresetData? {
         if let id = UUID(uuidString: idOrName), let preset = presetStore.preset(for: id) {
             return preset
         }
         return presetStore.allPresets.first { $0.name.caseInsensitiveCompare(idOrName) == .orderedSame }
+    }
+
+    /// Forks (if needed) and persists the active preset. A no-op in the common case (already
+    /// a custom preset with no pending changes since every CLI mutation already persists
+    /// immediately) — the one thing it actually does is "adopt" a freshly-selected built-in
+    /// into a real custom preset, mirroring the GUI's Save -> Save-As-for-built-ins rule
+    /// minus the name prompt (per the CLI's auto-fork convention).
+    @discardableResult
+    func saveActivePreset() -> CLIPresetSummary {
+        let preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        persistBandMutation(preset)
+        return CLIPresetSummary(id: preset.id, name: preset.name, isBuiltIn: false,
+                                 isFavorite: presetStore.isFavorite(preset.id), isActive: true)
+    }
+
+    /// There's no "unsaved edit" concept in the CLI model (every mutation persists
+    /// immediately), so DreamViewModel.resetToSnapshot()'s GUI meaning ("revert to last
+    /// save") has no CLI analog. Instead this switches back to Flat — the same terminal
+    /// state deleteCurrentPreset already falls back to.
+    func resetActivePreset() {
+        applyPreset(id: EQPresetData.flat.id)
+    }
+
+    func deletePreset(idOrName: String) throws {
+        guard let preset = resolvePreset(idOrName: idOrName) else {
+            throw CLIHandlerError(message: "no preset named '\(idOrName)'")
+        }
+        guard preset.id != EQPresetData.flat.id else {
+            throw CLIHandlerError(message: "Flat can't be deleted")
+        }
+        if preset.isBuiltIn {
+            presetStore.hideBuiltInPreset(id: preset.id)
+        } else {
+            presetStore.deleteCustomPreset(id: preset.id)
+        }
+        if audioEngine.activePreset.id == preset.id {
+            applyPreset(id: EQPresetData.flat.id)
+        }
+    }
+
+    func newPreset(name: String?) throws -> CLIPresetSummary {
+        let resolvedName: String
+        if let name {
+            let trimmed = name.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { throw CLIHandlerError(message: "name can't be empty") }
+            guard !presetStore.allPresets.contains(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) else {
+                throw CLIHandlerError(message: "a preset named '\(trimmed)' already exists")
+            }
+            resolvedName = trimmed
+        } else {
+            let existing = presetStore.allPresets.map(\.name)
+            var n = 1
+            while existing.contains("Custom EQ \(n)") { n += 1 }
+            resolvedName = "Custom EQ \(n)"
+        }
+        let preset = EQPresetData(id: UUID(), name: resolvedName, bands: EQPresetData.flat.bands, isBuiltIn: false)
+        persistBandMutation(preset)
+        return CLIPresetSummary(id: preset.id, name: preset.name, isBuiltIn: false, isFavorite: false, isActive: true)
+    }
+
+    /// Renaming a built-in forks it first and renames the fork — the true built-in is never
+    /// mutated in place, consistent with every other CLI mutation. Renaming "Flat" itself is
+    /// deliberately not blocked (unlike delete): it only ever creates a harmless fork.
+    func renamePreset(idOrName: String, newName: String) throws -> CLIPresetSummary {
+        guard let source = resolvePreset(idOrName: idOrName) else {
+            throw CLIHandlerError(message: "no preset named '\(idOrName)'")
+        }
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { throw CLIHandlerError(message: "new name can't be empty") }
+        guard !presetStore.allPresets.contains(where: { $0.id != source.id && $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) else {
+            throw CLIHandlerError(message: "a preset named '\(trimmed)' already exists")
+        }
+        var renamed = presetStore.forkIfBuiltIn(source)
+        renamed.name = trimmed
+        presetStore.saveCustomPreset(renamed)
+        if audioEngine.activePreset.id == source.id {
+            persistBandMutation(renamed)
+        }
+        return CLIPresetSummary(id: renamed.id, name: renamed.name, isBuiltIn: false,
+                                 isFavorite: presetStore.isFavorite(renamed.id), isActive: audioEngine.activePreset.id == renamed.id)
+    }
+
+    /// Never switches the active preset — creates an inactive copy in the picker.
+    func duplicatePreset(idOrName: String, newName: String?) throws -> CLIPresetSummary {
+        guard let source = resolvePreset(idOrName: idOrName) else {
+            throw CLIHandlerError(message: "no preset named '\(idOrName)'")
+        }
+        let resolvedName: String
+        if let newName {
+            let trimmed = newName.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { throw CLIHandlerError(message: "new name can't be empty") }
+            guard !presetStore.allPresets.contains(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) else {
+                throw CLIHandlerError(message: "a preset named '\(trimmed)' already exists")
+            }
+            resolvedName = trimmed
+        } else {
+            resolvedName = presetStore.dedupedName(base: "\(source.name) copy")
+        }
+        let copy = EQPresetData(id: UUID(), name: resolvedName, bands: source.bands, rightBands: source.rightBands,
+                                 isBuiltIn: false, inputGainDB: source.inputGainDB, outputGainDB: source.outputGainDB)
+        presetStore.saveCustomPreset(copy)
+        return CLIPresetSummary(id: copy.id, name: copy.name, isBuiltIn: false, isFavorite: false, isActive: false)
+    }
+
+    func setFavoritePreset(idOrName: String, favorite: Bool) throws -> Bool {
+        guard let preset = resolvePreset(idOrName: idOrName) else {
+            throw CLIHandlerError(message: "no preset named '\(idOrName)'")
+        }
+        if presetStore.isFavorite(preset.id) != favorite {
+            presetStore.toggleFavorite(preset.id)
+        }
+        return presetStore.isFavorite(preset.id)
+    }
+
+    func toggleFavoritePreset(idOrName: String) throws -> Bool {
+        guard let preset = resolvePreset(idOrName: idOrName) else {
+            throw CLIHandlerError(message: "no preset named '\(idOrName)'")
+        }
+        presetStore.toggleFavorite(preset.id)
+        return presetStore.isFavorite(preset.id)
+    }
+
+    /// Closes PresetStore.pinPreset's existing lack of an id-existence check at this call
+    /// site, since it's the new caller introducing this path from the CLI.
+    func pinPreset(idOrName: String) throws {
+        guard let preset = resolvePreset(idOrName: idOrName) else {
+            throw CLIHandlerError(message: "no preset named '\(idOrName)'")
+        }
+        guard let uid = audioEngine.outputDeviceUID else {
+            throw CLIHandlerError(message: "no output device to pin to")
+        }
+        presetStore.pinPreset(preset.id, toDeviceUID: uid)
+    }
+
+    func unpinPreset() throws {
+        guard let uid = audioEngine.outputDeviceUID else {
+            throw CLIHandlerError(message: "no output device to unpin")
+        }
+        presetStore.unpinPreset(fromDeviceUID: uid)
+    }
+
+    func listHiddenPresets() -> [CLIPresetSummary] {
+        presetStore.hiddenBuiltInPresets.map {
+            CLIPresetSummary(id: $0.id, name: $0.name, isBuiltIn: true, isFavorite: false, isActive: false)
+        }
+    }
+
+    func restoreBuiltInPreset(idOrName: String) throws {
+        let match = UUID(uuidString: idOrName).flatMap { id in presetStore.hiddenBuiltInPresets.first { $0.id == id } }
+            ?? presetStore.hiddenBuiltInPresets.first { $0.name.caseInsensitiveCompare(idOrName) == .orderedSame }
+        guard let preset = match else {
+            throw CLIHandlerError(message: "no hidden built-in preset named '\(idOrName)'")
+        }
+        presetStore.restoreBuiltInPreset(id: preset.id)
+    }
+
+    // MARK: - CLI Support: Import/Export
+
+    func importPresetFile(path: String, overwrite: Bool) throws -> CLIPresetSummary {
+        let url = URL(fileURLWithPath: path)
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw CLIHandlerError(message: "couldn't read '\(path)': \(error.localizedDescription)")
+        }
+        let parsed: ParsedPreset
+        do {
+            parsed = try PresetImporter.parse(data: data, filename: url.lastPathComponent)
+        } catch {
+            throw CLIHandlerError(message: error.localizedDescription)
+        }
+        let suggestedName = parsed.name ?? PresetImporter.defaultImportName(for: url)
+        if let existing = presetStore.customPresets.first(where: { $0.name.caseInsensitiveCompare(suggestedName) == .orderedSame }) {
+            guard overwrite else {
+                throw CLIHandlerError(message: "a preset named '\(suggestedName)' already exists — pass --overwrite to replace it")
+            }
+            presetStore.deleteCustomPreset(id: existing.id)
+        }
+        let preset = PresetImporter.makePreset(from: parsed, name: suggestedName)
+        presetStore.saveCustomPreset(preset)
+        persistBandMutation(preset)
+        return CLIPresetSummary(id: preset.id, name: preset.name, isBuiltIn: false, isFavorite: false, isActive: true)
+    }
+
+    func exportPreset(idOrName: String?, outputPath: String) throws {
+        let preset: EQPresetData
+        if let idOrName {
+            guard let resolved = resolvePreset(idOrName: idOrName) else {
+                throw CLIHandlerError(message: "no preset named '\(idOrName)'")
+            }
+            preset = resolved
+        } else {
+            preset = audioEngine.activePreset
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        do {
+            let data = try encoder.encode(preset)
+            try data.write(to: URL(fileURLWithPath: outputPath))
+        } catch {
+            throw CLIHandlerError(message: "couldn't write '\(outputPath)': \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - CLI Support: OPRA catalog
+
+    /// Matches against vendor, product, AND the combined "vendor product" string — vendor
+    /// and product name are stored as separate fields, but users naturally search for both
+    /// together (e.g. "Sennheiser HD 600"), which matches neither field alone.
+    private func matchingOPRAProducts(_ products: [OPRAProductEntry], query: String) -> [OPRAProductEntry] {
+        let q = query.lowercased()
+        return products.filter {
+            $0.vendorName.lowercased().contains(q)
+                || $0.productName.lowercased().contains(q)
+                || "\($0.vendorName) \($0.productName)".lowercased().contains(q)
+        }
+    }
+
+    func searchOPRA(query: String) async throws -> [CLIOPRAProductSummary] {
+        let products: [OPRAProductEntry]
+        do {
+            products = try await OPRACatalog.shared.loadIfNeeded()
+        } catch {
+            throw CLIHandlerError(message: error.localizedDescription)
+        }
+        return matchingOPRAProducts(products, query: query).map {
+            CLIOPRAProductSummary(id: $0.id, vendorName: $0.vendorName, productName: $0.productName,
+                                   curveAuthors: $0.curves.map(\.author))
+        }
+    }
+
+    func importOPRA(query: String, curveAuthor: String?, overwrite: Bool) async throws -> CLIPresetSummary {
+        let products: [OPRAProductEntry]
+        do {
+            products = try await OPRACatalog.shared.loadIfNeeded()
+        } catch {
+            throw CLIHandlerError(message: error.localizedDescription)
+        }
+        let matches = matchingOPRAProducts(products, query: query)
+        guard !matches.isEmpty else {
+            throw CLIHandlerError(message: "no OPRA product matches '\(query)'")
+        }
+        guard matches.count == 1 else {
+            let names = matches.prefix(10).map { "\($0.vendorName) \($0.productName)" }.joined(separator: ", ")
+            throw CLIHandlerError(message: "'\(query)' matches multiple products (\(names)) — narrow your query")
+        }
+        let product = matches[0]
+
+        let curve: OPRACurveEntry
+        if product.curves.count == 1 {
+            curve = product.curves[0]
+        } else if let curveAuthor {
+            let curveMatches = product.curves.filter { $0.author.localizedCaseInsensitiveContains(curveAuthor) }
+            guard curveMatches.count == 1 else {
+                let authors = product.curves.map(\.author).joined(separator: ", ")
+                throw CLIHandlerError(message: "--curve '\(curveAuthor)' didn't match exactly one curve (available: \(authors))")
+            }
+            curve = curveMatches[0]
+        } else {
+            let authors = product.curves.map(\.author).joined(separator: ", ")
+            throw CLIHandlerError(message: "\(product.vendorName) \(product.productName) has multiple curves — pass --curve (available: \(authors))")
+        }
+
+        let parsed: ParsedPreset
+        do {
+            parsed = try PresetImporter.parse(data: curve.data, filename: product.productName)
+        } catch {
+            throw CLIHandlerError(message: error.localizedDescription)
+        }
+        let suggestedName = "\(product.vendorName) \(product.productName)"
+        if let existing = presetStore.customPresets.first(where: { $0.name.caseInsensitiveCompare(suggestedName) == .orderedSame }) {
+            guard overwrite else {
+                throw CLIHandlerError(message: "a preset named '\(suggestedName)' already exists — pass --overwrite to replace it")
+            }
+            presetStore.deleteCustomPreset(id: existing.id)
+        }
+        let preset = PresetImporter.makePreset(from: parsed, name: suggestedName)
+        presetStore.saveCustomPreset(preset)
+        persistBandMutation(preset)
+        return CLIPresetSummary(id: preset.id, name: preset.name, isBuiltIn: false, isFavorite: false, isActive: true)
     }
 
     var appVersion: String {
@@ -396,6 +931,9 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
             gainIsGlobal: audioEngine.gainIsGlobal,
             outputDeviceName: audioEngine.outputDeviceName,
             isRunning: audioEngine.isRunning,
+            peakLimiter: audioEngine.peakLimiter,
+            preEqSpectrumEnabled: iQualizeState.load().preEqSpectrumEnabled,
+            postEqSpectrumEnabled: iQualizeState.load().postEqSpectrumEnabled,
             appVersion: appVersion,
             gitCommit: appGitCommit,
             captureFillFrames: capture?.fillFrames,

@@ -32,6 +32,33 @@ struct ParsedPreset {
 
 enum PresetImporter {
 
+    /// Turns a format-agnostic parse result into a real, savable preset — new UUID,
+    /// never built-in.
+    static func makePreset(from parsed: ParsedPreset, name: String) -> EQPresetData {
+        EQPresetData(
+            id: UUID(),
+            name: name,
+            bands: parsed.bands,
+            rightBands: parsed.rightBands,
+            isBuiltIn: false,
+            inputGainDB: parsed.inputGainDB,
+            outputGainDB: parsed.outputGainDB
+        )
+    }
+
+    /// Derives a default preset name from an imported file's name, stripping AutoEQ's
+    /// conventional " ParametricEQ"/" GraphicEQ" filename suffix if present so e.g.
+    /// "Sennheiser HD 600 ParametricEQ.txt" defaults to "Sennheiser HD 600".
+    static func defaultImportName(for url: URL) -> String {
+        let base = url.deletingPathExtension().lastPathComponent
+        for suffix in [" ParametricEQ", " GraphicEQ"] {
+            if base.range(of: suffix, options: [.caseInsensitive, .anchored, .backwards]) != nil {
+                return String(base.dropLast(suffix.count))
+            }
+        }
+        return base
+    }
+
     static func parse(data: Data, filename: String) throws -> ParsedPreset {
         if let decoded = try? JSONDecoder().decode(EQPresetData.self, from: data), !decoded.bands.isEmpty {
             return ParsedPreset(

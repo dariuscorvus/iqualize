@@ -111,16 +111,16 @@ final class iQualizeStateTests: XCTestCase {
 
     func testDefaultState() {
         let state = iQualizeState.defaultState
-        XCTAssertFalse(state.isEnabled)
+        XCTAssertTrue(state.captureEnabled)
         XCTAssertEqual(state.selectedPresetID, EQPresetData.flat.id)
         XCTAssertTrue(state.peakLimiter)
     }
 
     func testCodableRoundTrip() throws {
-        let original = iQualizeState(isEnabled: true, selectedPresetID: EQPresetData.bassBoost.id, peakLimiter: false)
+        let original = iQualizeState(captureEnabled: true, selectedPresetID: EQPresetData.bassBoost.id, peakLimiter: false)
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(iQualizeState.self, from: data)
-        XCTAssertEqual(decoded.isEnabled, original.isEnabled)
+        XCTAssertEqual(decoded.captureEnabled, original.captureEnabled)
         XCTAssertEqual(decoded.selectedPresetID, original.selectedPresetID)
         XCTAssertEqual(decoded.peakLimiter, original.peakLimiter)
     }

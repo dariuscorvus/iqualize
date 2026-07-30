@@ -44,10 +44,14 @@ func formatStatus(_ status: CLIStatusPayload) -> String {
     let mode = status.gainIsGlobal ? "shared" : "per-preset"
     var lines = """
     Version: \(formatVersion(status))
+    Capture: \(status.isRunning ? "on" : "off")
     Bypass: \(status.bypassed ? "on" : "off")
+    Peak limiter: \(status.peakLimiter ? "on" : "off")
     Preset: \(status.activePresetName)
     Gain: \(String(format: "input %+.1f dB, output %+.1f dB", status.inputGainDB, status.outputGainDB)) (\(mode))
     Balance: \(formatBalance(status.balance))
+    Pre-EQ spectrum: \(status.preEqSpectrumEnabled ? "on" : "off")
+    Post-EQ spectrum: \(status.postEqSpectrumEnabled ? "on" : "off")
     Output device: \(status.outputDeviceName)
     """
     // Drift telemetry (#133); absent while the engine is stopped or from
