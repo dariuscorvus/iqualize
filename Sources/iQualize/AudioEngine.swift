@@ -454,6 +454,15 @@ final class AudioEngine {
         captureClient = nil
     }
 
+    /// A muted band's gain for DSP purposes is always 0, regardless of its stored `.gain` —
+    /// the stored value is preserved so muting is non-destructive (needed for CLI mute,
+    /// which has no second, un-muted copy of the bands the way the GUI's own
+    /// `pushBandsToEngine` does by zeroing `.gain` in a transient copy while keeping the
+    /// real value in `DreamViewModel.bands`).
+    private func effectiveGain(_ band: EQBand) -> Float {
+        band.muted ? 0 : band.gain
+    }
+
     private func applyBands(from old: EQPresetData? = nil) {
         guard let eq else { return }
 
@@ -462,8 +471,13 @@ final class AudioEngine {
             eq.bypass = true
             let sr = outputSampleRate
 
-            let leftBands = activePreset.bands
-            let rightBands = activePreset.rightBands ?? activePreset.bands
+            let leftBands = activePreset.bands.map { band -> EQBand in
+                var b = band; b.gain = effectiveGain(band); return b
+            }
+            let rightSource = activePreset.rightBands ?? activePreset.bands
+            let rightBands = rightSource.map { band -> EQBand in
+                var b = band; b.gain = effectiveGain(band); return b
+            }
 
             if let chainL = rtBiquadChainL {
                 chainL.updateCoefficients(bands: leftBands, sampleRate: sr)
@@ -491,19 +505,19 @@ final class AudioEngine {
                     eqBand.filterType = band.filterType.avType
                     eqBand.frequency = band.frequency
                     eqBand.bandwidth = band.bandwidth
-                    eqBand.gain = band.gain
+                    eqBand.gain = effectiveGain(band)
                     eqBand.bypass = false
                 } else if let oldBand = old?.bands[i] {
                     // Existing band — only update changed params
                     if band.filterType != oldBand.filterType { eqBand.filterType = band.filterType.avType }
                     if band.frequency != oldBand.frequency { eqBand.frequency = band.frequency }
-                    if band.gain != oldBand.gain { eqBand.gain = band.gain }
+                    if effectiveGain(band) != effectiveGain(oldBand) { eqBand.gain = effectiveGain(band) }
                     if band.bandwidth != oldBand.bandwidth { eqBand.bandwidth = band.bandwidth }
                 } else {
                     // No old data — write everything
                     eqBand.filterType = band.filterType.avType
                     eqBand.frequency = band.frequency
-                    eqBand.gain = band.gain
+                    eqBand.gain = effectiveGain(band)
                     eqBand.bandwidth = band.bandwidth
                 }
             }

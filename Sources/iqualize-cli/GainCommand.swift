@@ -5,7 +5,7 @@ struct Gain: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "gain",
         abstract: "Get or set input/output gain.",
-        subcommands: [Input.self, Output.self]
+        subcommands: [Input.self, Output.self, Link.self]
     )
 
     struct Input: ParsableCommand {
@@ -37,6 +37,32 @@ struct Gain: ParsableCommand {
             if let status = response.status {
                 print(String(format: "Output gain: %+.1f dB", status.outputGainDB))
             }
+        }
+    }
+
+    struct Link: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Get or set whether In/Out gain is shared across all presets.")
+
+        enum Action: String, ExpressibleByArgument, CaseIterable {
+            case on, off, toggle
+        }
+
+        @Argument(help: "on, off, or toggle. Omit to just print the current state.")
+        var action: Action?
+
+        func run() {
+            let response: CLIResponse
+            switch action {
+            case nil:
+                response = requireOK(sendOrExit(CLIRequest(command: CLICommand.status)))
+            case .on:
+                response = requireOK(sendOrExit(CLIRequest(command: CLICommand.setGainIsGlobal, boolArg: true)))
+            case .off:
+                response = requireOK(sendOrExit(CLIRequest(command: CLICommand.setGainIsGlobal, boolArg: false)))
+            case .toggle:
+                response = requireOK(sendOrExit(CLIRequest(command: CLICommand.toggleGainIsGlobal)))
+            }
+            print("Gain link: \(response.status?.gainIsGlobal == true ? "on" : "off")")
         }
     }
 }

@@ -3,7 +3,12 @@ import Foundation
 // MARK: - State Persistence
 
 struct iQualizeState: Codable {
-    var isEnabled: Bool
+    /// Whether capture should start automatically at launch. A distinct field name (not a
+    /// repurposed old one) matters here: every existing persisted blob already has an
+    /// explicit "isEnabled": false key from long before this was ever consulted for
+    /// behavior (nothing ever wrote true), so a same-named field's decode fallback would
+    /// never apply and every existing install would silently start with capture off.
+    var captureEnabled: Bool
     var selectedPresetID: UUID
     var peakLimiter: Bool
     var windowOpen: Bool
@@ -41,7 +46,7 @@ struct iQualizeState: Codable {
     var zoomRange: String?
 
     static let defaultState = iQualizeState(
-        isEnabled: false,
+        captureEnabled: true,
         selectedPresetID: EQPresetData.flat.id,
         peakLimiter: true,
         windowOpen: false,
@@ -68,8 +73,8 @@ struct iQualizeState: Codable {
 
     private static let key = "com.iqualize.state"
 
-    init(isEnabled: Bool, selectedPresetID: UUID, peakLimiter: Bool, windowOpen: Bool = false, maxGainDB: Float = 12, bypassed: Bool = false, autoScale: Bool = true, preEqSpectrumEnabled: Bool = false, postEqSpectrumEnabled: Bool = false, hideFromDock: Bool = false, startAtLogin: Bool = false, balance: Float = 0.0, splitChannelEnabled: Bool = false, activeChannel: String? = nil, inputGainDB: Float = 0.0, outputGainDB: Float = 0.0, linkGainGlobally: Bool = false, showBandwidthAsQ: Bool = true, preEqLineColorHex: String? = nil, postEqLineColorHex: String? = nil, preEqFillColorHex: String? = nil, postEqFillColorHex: String? = nil, preEqFillEnabled: Bool = false, postEqFillEnabled: Bool = true, dreamTheme: String? = nil, snapToSemitone: Bool = false, zoomRange: String? = nil) {
-        self.isEnabled = isEnabled
+    init(captureEnabled: Bool, selectedPresetID: UUID, peakLimiter: Bool, windowOpen: Bool = false, maxGainDB: Float = 12, bypassed: Bool = false, autoScale: Bool = true, preEqSpectrumEnabled: Bool = false, postEqSpectrumEnabled: Bool = false, hideFromDock: Bool = false, startAtLogin: Bool = false, balance: Float = 0.0, splitChannelEnabled: Bool = false, activeChannel: String? = nil, inputGainDB: Float = 0.0, outputGainDB: Float = 0.0, linkGainGlobally: Bool = false, showBandwidthAsQ: Bool = true, preEqLineColorHex: String? = nil, postEqLineColorHex: String? = nil, preEqFillColorHex: String? = nil, postEqFillColorHex: String? = nil, preEqFillEnabled: Bool = false, postEqFillEnabled: Bool = true, dreamTheme: String? = nil, snapToSemitone: Bool = false, zoomRange: String? = nil) {
+        self.captureEnabled = captureEnabled
         self.selectedPresetID = selectedPresetID
         self.peakLimiter = peakLimiter
         self.windowOpen = windowOpen
@@ -100,7 +105,7 @@ struct iQualizeState: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        isEnabled = (try? container.decode(Bool.self, forKey: .isEnabled)) ?? false
+        captureEnabled = (try? container.decode(Bool.self, forKey: .captureEnabled)) ?? true
         selectedPresetID = (try? container.decode(UUID.self, forKey: .selectedPresetID)) ?? EQPresetData.flat.id
         peakLimiter = (try? container.decode(Bool.self, forKey: .peakLimiter)) ?? true
         windowOpen = (try? container.decode(Bool.self, forKey: .windowOpen)) ?? false

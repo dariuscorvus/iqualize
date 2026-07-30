@@ -33,7 +33,12 @@ final class PresetStore {
     private static let hiddenBuiltInsKey = "com.iqualize.hiddenBuiltInPresetIDs"
     private static let devicePinsKey = "com.iqualize.pinnedPresetsByDevice"
 
-    init() {
+    /// Injectable so tests can use an isolated suite instead of polluting the real app's
+    /// persisted state (or leaking test data between runs).
+    private let defaults: UserDefaults
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.defaults = userDefaults
         load()
     }
 
@@ -121,17 +126,9 @@ final class PresetStore {
     /// touch AudioEngine; callers decide whether/when to call `saveCustomPreset`.
     func forkIfBuiltIn(_ preset: EQPresetData) -> EQPresetData {
         guard preset.isBuiltIn else { return preset }
-        let baseName = "\(preset.name) (Custom)"
-        let existing = allPresets.map { $0.name }
-        var forkName = baseName
-        if existing.contains(forkName) {
-            var n = 2
-            while existing.contains("\(baseName) \(n)") { n += 1 }
-            forkName = "\(baseName) \(n)"
-        }
         return EQPresetData(
             id: UUID(),
-            name: forkName,
+            name: dedupedName(base: "\(preset.name) (Custom)"),
             bands: preset.bands,
             rightBands: preset.rightBands,
             isBuiltIn: false,
@@ -140,20 +137,30 @@ final class PresetStore {
         )
     }
 
+    /// Appends " 2", " 3", ... to `base` until it doesn't collide (exact match) with any
+    /// current preset name. Shared by `forkIfBuiltIn` and the CLI's `duplicate` command.
+    func dedupedName(base: String) -> String {
+        let existing = Set(allPresets.map { $0.name })
+        guard existing.contains(base) else { return base }
+        var n = 2
+        while existing.contains("\(base) \(n)") { n += 1 }
+        return "\(base) \(n)"
+    }
+
     private func load() {
-        if let data = UserDefaults.standard.data(forKey: Self.key),
+        if let data = defaults.data(forKey: Self.key),
            let presets = try? JSONDecoder().decode([EQPresetData].self, from: data) {
             customPresets = presets
         }
-        if let data = UserDefaults.standard.data(forKey: Self.favoritesKey),
+        if let data = defaults.data(forKey: Self.favoritesKey),
            let ids = try? JSONDecoder().decode([UUID].self, from: data) {
             favoritePresetIDs = ids
         }
-        if let data = UserDefaults.standard.data(forKey: Self.hiddenBuiltInsKey),
+        if let data = defaults.data(forKey: Self.hiddenBuiltInsKey),
            let ids = try? JSONDecoder().decode([UUID].self, from: data) {
             hiddenBuiltInPresetIDs = ids
         }
-        if let data = UserDefaults.standard.data(forKey: Self.devicePinsKey),
+        if let data = defaults.data(forKey: Self.devicePinsKey),
            let pins = try? JSONDecoder().decode([String: UUID].self, from: data) {
             pinnedPresetIDByDeviceUID = pins
         }
@@ -161,25 +168,25 @@ final class PresetStore {
 
     private func persist() {
         if let data = try? JSONEncoder().encode(customPresets) {
-            UserDefaults.standard.set(data, forKey: Self.key)
+            defaults.set(data, forKey: Self.key)
         }
     }
 
     private func persistFavorites() {
         if let data = try? JSONEncoder().encode(favoritePresetIDs) {
-            UserDefaults.standard.set(data, forKey: Self.favoritesKey)
+            defaults.set(data, forKey: Self.favoritesKey)
         }
     }
 
     private func persistHiddenBuiltIns() {
         if let data = try? JSONEncoder().encode(hiddenBuiltInPresetIDs) {
-            UserDefaults.standard.set(data, forKey: Self.hiddenBuiltInsKey)
+            defaults.set(data, forKey: Self.hiddenBuiltInsKey)
         }
     }
 
     private func persistDevicePins() {
         if let data = try? JSONEncoder().encode(pinnedPresetIDByDeviceUID) {
-            UserDefaults.standard.set(data, forKey: Self.devicePinsKey)
+            defaults.set(data, forKey: Self.devicePinsKey)
         }
     }
 }

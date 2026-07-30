@@ -2,7 +2,14 @@
 
 All notable changes to iQualize will be documented in this file.
 
-## [0.51.4] - 2026-07-29
+## [0.52.0] - 2026-07-30
+
+### Added
+- CLI parity for the rest of #122: EQ band editing (`iqualize band list/add/set/delete/move/mute`, addressed by `--index` or nearest-frequency `--near`), preset lifecycle (`presets save/reset/new/rename/duplicate/favorite/pin/unpin`), hidden built-in presets (`presets hidden/restore`), file import/export (`presets import/export`, same AutoEQ/OPRA/iQualize formats and formats the GUI already parses), and the OPRA community catalog (`presets opra search/import`). All band/preset mutations against a built-in preset auto-fork and persist immediately, matching the existing `gain`/`limiter` CLI commands rather than the GUI's Save-As name prompt. Mute is non-destructive — a muted band's gain is preserved and unaffected in `band list`, unlike the GUI's own mute which zeroes gain in a transient copy (`AudioEngine.applyBands` now respects `.muted` at the DSP layer via `effectiveGain(_:)` instead). Import/export require an explicit `--overwrite` on a name collision rather than silently renaming. `iqualize tldr` documents every new command with examples.
+- OPRA catalog search/import can involve a real network fetch on a cache miss — this no longer blocks other CLI commands from getting an immediate response while it's in flight, and the CLI's response timeout is now 30s (was 5s) to give it room to complete.
+
+### Fixed
+- `PresetStore.pinPreset` had no check that the target preset actually exists — closed at the new CLI `presets pin` call site (the GUI's own pin button was never affected, since it only ever pins the already-active preset).
 
 ### Fixed
 - The EQ window didn't fully restyle when its theme (Settings → Theme) disagreed with the system-wide appearance: text and accents switched immediately, but the window background and axis labels stayed on the old appearance, sometimes leaving light text on a light background or vice versa. `DreamRootView` looked up the window to restyle via `NSApp.windows.first(where: title contains "iQualize" or empty)`, which could silently match the Help window or a status-item window instead of the EQ window itself — it now uses a direct reference set by `DreamHostingView` when the window is created. Applying that override also moved from an `.onChange`/`.onAppear` side effect into the view's `body`, since the old timing applied the appearance one render after SwiftUI had already resolved that render's system colors against the previous one. Reported by Gary (@nordicdata, #144)
