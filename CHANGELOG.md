@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.53.0] - 2026-07-30
+
+### Changed
+- Removed the fixed 31-band EQ limit (#114). AVAudioUnitEQ (Apple's AUNBandEQ) has a real, OS-defined ceiling on how many bands it can natively process — not just an app-chosen constant — so growing its allocation on demand was never going to get to "CPU-bound only." Bands beyond that native capacity now run through the app's own biquad chain (`BiquadFilterChain`), cascaded ahead of AVAudioUnitEQ in the render callback; split-channel mode already used this chain exclusively and was unaffected. The CLI's add-band cap and the AutoEQ/OPRA import truncation are both gone — only the GraphicEQ import's fixed 31-point ISO resampling grid remains, since that's a property of the format, not the engine.
+
 ## [0.52.0] - 2026-07-30
 
 ### Added

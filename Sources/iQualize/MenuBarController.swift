@@ -506,15 +506,8 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         return preset.bands.sorted { $0.frequency < $1.frequency }.map { bandSummary(for: $0, in: preset) }
     }
 
-    /// The 31-band cap is enforced here — AudioEngine.swift creates its AVAudioUnitEQ node
-    /// with a fixed numberOfBands: EQPresetData.maxBandCount (31) and indexes into it with no
-    /// bounds check, so a 32nd band would crash the audio engine. That gap is pre-existing and
-    /// not fixed here — this new code path simply never reaches it.
     func addBand(frequency: Float?, gain: Float?, bandwidth: Float?, filterType: String?) throws -> CLIBandSummary {
         var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
-        guard preset.bands.count < EQPresetData.maxBandCount else {
-            throw CLIHandlerError(message: "preset already has the maximum of \(EQPresetData.maxBandCount) bands")
-        }
         let type: FilterType
         if let filterType {
             guard let parsed = FilterType(rawValue: filterType) else {

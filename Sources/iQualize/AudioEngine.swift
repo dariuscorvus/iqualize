@@ -32,13 +32,17 @@ nonisolated(unsafe) private var rtInputGain: Float = 1.0
 /// (see GainPolicy.tapHeadroomCompensation). Applied unconditionally — the tap
 /// attenuates in Bypass too, so Bypass must compensate to sound like app-off.
 nonisolated(unsafe) private var rtVolumeCompensation: Float = 1.0
-/// Per-channel biquad filter chains for split channel mode.
-/// Only active when rtSplitChannelActive is true.
+/// Per-channel biquad filter chains, run in this callback ahead of AVAudioUnitEQ.
+/// Only active when rtBiquadChainActive is true. Two roles, depending on mode:
+/// in split channel mode they carry the full band lists (AVAudioUnitEQ is bypassed
+/// entirely); in linked mode they carry only the bands beyond AVAudioUnitEQ's fixed
+/// native capacity (see AudioEngine.avEQNativeBandCount), so there's no hard cap on
+/// band count in either mode.
 /// Channels 2+ (e.g. 5.1/7.1 surround) pass through unprocessed — per-channel
 /// EQ for >2 channels is a separate feature.
 nonisolated(unsafe) private var rtBiquadChainL: BiquadFilterChain?
 nonisolated(unsafe) private var rtBiquadChainR: BiquadFilterChain?
-nonisolated(unsafe) private var rtSplitChannelActive: Bool = false
+nonisolated(unsafe) private var rtBiquadChainActive: Bool = false
 
 /// AVAudioSourceNode render block: pulls interleaved audio from the capture
 /// client's shared ring buffer, deinterleaves into separate channel buffers
@@ -77,9 +81,11 @@ private func renderCallback(
                             frames: frames, gain: rtInputGain * balance * rtVolumeCompensation)
     }
 
-    // Apply per-channel biquad EQ when split channel mode is active.
-    // This runs INSTEAD of AVAudioUnitEQ (which is bypassed in split mode).
-    if rtSplitChannelActive {
+    // Apply per-channel biquad EQ when a chain is configured — either the whole
+    // preset in split channel mode (AVAudioUnitEQ bypassed), or the overflow
+    // bands beyond AVAudioUnitEQ's native capacity in linked mode (runs ahead
+    // of it in the graph, feeding it already-partially-EQ'd audio).
+    if rtBiquadChainActive {
         if bufferList.count > 0, let outL = bufferList[0].mData?.assumingMemoryBound(to: Float.self) {
             rtBiquadChainL?.process(outL, frameCount: frames)
         }
@@ -113,6 +119,10 @@ func deinterleaveChannel(
 @Observable
 @MainActor
 final class AudioEngine {
+    /// AVAudioUnitEQ's own native band capacity — an AudioEngine implementation
+    /// detail, not a user-facing limit. See the comment at its allocation in start().
+    private static let avEQNativeBandCount = 31
+
     private(set) var isRunning = false
     private(set) var outputDeviceName = "Unknown"
     private(set) var outputDeviceUID: String?
@@ -176,10 +186,7 @@ final class AudioEngine {
     }
 
     var splitChannelActive: Bool = false {
-        didSet {
-            rtSplitChannelActive = splitChannelActive
-            applyBands()
-        }
+        didSet { applyBands() }
     }
 
     var inputGainDB: Float = 0.0 {
@@ -300,30 +307,16 @@ final class AudioEngine {
         let sourceNode = AVAudioSourceNode(format: format, renderBlock: renderCallback)
         self.sourceNode = sourceNode
 
-        let eqNode = AVAudioUnitEQ(numberOfBands: EQPresetData.maxBandCount)
-        for (i, eqBand) in eqNode.bands.enumerated() {
-            if i < activePreset.bands.count {
-                let band = activePreset.bands[i]
-                eqBand.filterType = band.filterType.avType
-                eqBand.frequency = band.frequency
-                eqBand.bandwidth = band.bandwidth
-                eqBand.gain = band.gain
-                eqBand.bypass = false
-            } else {
-                eqBand.bypass = true
-            }
-        }
-        eqNode.globalGain = 0
-        if splitChannelActive && !bypassed {
-            // Split channel mode: bypass AVAudioUnitEQ, set up biquad chains
-            eqNode.bypass = true
-            rtBiquadChainL = BiquadFilterChain(bands: activePreset.bands, sampleRate: sampleRate)
-            rtBiquadChainR = BiquadFilterChain(bands: activePreset.rightBands ?? activePreset.bands, sampleRate: sampleRate)
-            rtSplitChannelActive = true
-        } else {
-            eqNode.bypass = bypassed || activePreset.isFlat
-        }
+        // AVAudioUnitEQ (Apple's AUNBandEQ) natively processes up to
+        // Self.avEQNativeBandCount bands — it's allocated at a fixed size and,
+        // per Apple's own kAUNBandEQProperty_MaxNumberOfBands, can't grow past
+        // its own hardware/OS-defined ceiling regardless of what's requested
+        // here. Any bands beyond that run through rtBiquadChainL/R instead
+        // (see applyBands and the render callback above), so there's no
+        // app-imposed cap on band count — only CPU.
+        let eqNode = AVAudioUnitEQ(numberOfBands: Self.avEQNativeBandCount)
         self.eq = eqNode
+        applyBands()
 
         // Peak limiter: dynamic limiting at 0 dBFS (replaces static preamp hack)
         let limiterDesc = AudioComponentDescription(
@@ -416,6 +409,7 @@ final class AudioEngine {
         rtCaptureClient = nil
         rtBiquadChainL = nil
         rtBiquadChainR = nil
+        rtBiquadChainActive = false
         rtVolumeCompensation = 1.0
 
         // Remove spectrum taps before stopping engine
@@ -461,6 +455,7 @@ final class AudioEngine {
         rtCaptureClient = nil
         rtBiquadChainL = nil
         rtBiquadChainR = nil
+        rtBiquadChainActive = false
         rtVolumeCompensation = 1.0
         sourceNode?.removeTap(onBus: 0)
         eq?.removeTap(onBus: 0)
@@ -482,42 +477,48 @@ final class AudioEngine {
         band.muted ? 0 : band.gain
     }
 
+    private func withEffectiveGain(_ bands: [EQBand]) -> [EQBand] {
+        bands.map { band -> EQBand in
+            var b = band; b.gain = effectiveGain(band); return b
+        }
+    }
+
+    /// Push `bands` into `rtBiquadChainL`/`R`, creating the chains on first use.
+    private func updateBiquadChains(leftBands: [EQBand], rightBands: [EQBand], sampleRate: Double) {
+        if let chainL = rtBiquadChainL {
+            chainL.updateCoefficients(bands: leftBands, sampleRate: sampleRate)
+        } else {
+            rtBiquadChainL = BiquadFilterChain(bands: leftBands, sampleRate: sampleRate)
+        }
+        if let chainR = rtBiquadChainR {
+            chainR.updateCoefficients(bands: rightBands, sampleRate: sampleRate)
+        } else {
+            rtBiquadChainR = BiquadFilterChain(bands: rightBands, sampleRate: sampleRate)
+        }
+    }
+
     private func applyBands(from old: EQPresetData? = nil) {
         guard let eq else { return }
 
         if splitChannelActive && !bypassed {
             // Split channel mode: bypass AVAudioUnitEQ, use custom biquad chains
+            // for the full band lists — already unbounded, no AU capacity involved.
             eq.bypass = true
-            let sr = outputSampleRate
-
-            let leftBands = activePreset.bands.map { band -> EQBand in
-                var b = band; b.gain = effectiveGain(band); return b
-            }
-            let rightSource = activePreset.rightBands ?? activePreset.bands
-            let rightBands = rightSource.map { band -> EQBand in
-                var b = band; b.gain = effectiveGain(band); return b
-            }
-
-            if let chainL = rtBiquadChainL {
-                chainL.updateCoefficients(bands: leftBands, sampleRate: sr)
-            } else {
-                rtBiquadChainL = BiquadFilterChain(bands: leftBands, sampleRate: sr)
-            }
-
-            if let chainR = rtBiquadChainR {
-                chainR.updateCoefficients(bands: rightBands, sampleRate: sr)
-            } else {
-                rtBiquadChainR = BiquadFilterChain(bands: rightBands, sampleRate: sr)
-            }
+            let leftBands = withEffectiveGain(activePreset.bands)
+            let rightBands = withEffectiveGain(activePreset.rightBands ?? activePreset.bands)
+            updateBiquadChains(leftBands: leftBands, rightBands: rightBands, sampleRate: outputSampleRate)
+            rtBiquadChainActive = true
         } else {
-            // Linked mode: use AVAudioUnitEQ, disable biquad chains
-            rtBiquadChainL = nil
-            rtBiquadChainR = nil
+            // Linked mode: AVAudioUnitEQ natively processes the first
+            // Self.avEQNativeBandCount bands; any remaining bands run through
+            // the biquad chains instead, cascaded ahead of it in the render
+            // callback — so band count here is CPU-bound, not AU-bound.
+            let allBands = activePreset.bands
+            let newCount = min(allBands.count, Self.avEQNativeBandCount)
+            let oldCount = min(old?.bands.count ?? 0, Self.avEQNativeBandCount)
 
-            let newCount = activePreset.bands.count
-            let oldCount = old?.bands.count ?? 0
-
-            for (i, band) in activePreset.bands.enumerated() {
+            for i in 0..<newCount {
+                let band = allBands[i]
                 let eqBand = eq.bands[i]
                 if i >= oldCount {
                     // New band — configure fully
@@ -532,20 +533,26 @@ final class AudioEngine {
                     if band.frequency != oldBand.frequency { eqBand.frequency = band.frequency }
                     if effectiveGain(band) != effectiveGain(oldBand) { eqBand.gain = effectiveGain(band) }
                     if band.bandwidth != oldBand.bandwidth { eqBand.bandwidth = band.bandwidth }
-                } else {
-                    // No old data — write everything
-                    eqBand.filterType = band.filterType.avType
-                    eqBand.frequency = band.frequency
-                    eqBand.gain = effectiveGain(band)
-                    eqBand.bandwidth = band.bandwidth
                 }
             }
 
-            // Bypass bands that are no longer active
-            if newCount < oldCount {
-                for i in newCount..<oldCount {
+            // Bypass AU slots not currently in use (covers both a preset shrinking
+            // and the very first call, where oldCount is 0 and eq.bands defaults
+            // to un-bypassed).
+            if newCount < eq.bands.count {
+                for i in newCount..<eq.bands.count {
                     eq.bands[i].bypass = true
                 }
+            }
+
+            if allBands.count > Self.avEQNativeBandCount {
+                let overflowBands = withEffectiveGain(Array(allBands[Self.avEQNativeBandCount...]))
+                updateBiquadChains(leftBands: overflowBands, rightBands: overflowBands, sampleRate: outputSampleRate)
+                rtBiquadChainActive = true
+            } else {
+                rtBiquadChainL = nil
+                rtBiquadChainR = nil
+                rtBiquadChainActive = false
             }
 
             eq.globalGain = 0
