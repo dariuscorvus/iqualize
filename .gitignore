@@ -5,3 +5,4 @@ xcuserdata/
 DerivedData/
 *.dmg
 .claude/skills/
+.DS_Store

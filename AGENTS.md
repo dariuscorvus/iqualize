@@ -25,7 +25,7 @@ Only do this when the user explicitly asks to cut/tag/publish a release — not 
 
 1. Bump the version and update `CHANGELOG.md` (should already be done in the merge PR, per above — backfill on `main` first if it wasn't).
 2. Tag the merge commit on `main`: `git tag vX.Y.Z <commit>` (lightweight tag, matching every existing tag in this repo) then `git push origin vX.Y.Z`.
-3. Build the installer: `bash create-dmg.sh` — builds, signs, packages, and verifies `iQualize-X.Y.Z.dmg` in the repo root. It runs `verify-dmg.sh` at the end and aborts if the app inside has a broken/invalid signature (the state macOS reports as "damaged" — issue #115). A `PreToolUse` hook (`.claude/settings.json`) also blocks `gh release create` on a DMG that fails the same check. The app is ad-hoc signed, not notarized, so downloads still need `xattr -dr com.apple.quarantine`.
+3. Build the installer: `bash scripts/create-dmg.sh` — builds, signs, packages, and verifies `iQualize-X.Y.Z.dmg` in the repo root. It runs `scripts/verify-dmg.sh` at the end and aborts if the app inside has a broken/invalid signature (the state macOS reports as "damaged" — issue #115). A `PreToolUse` hook (`.claude/settings.json`) also blocks `gh release create` on a DMG that fails the same check. The app is ad-hoc signed, not notarized, so downloads still need `xattr -dr com.apple.quarantine`.
 4. Publish the GitHub Release with the DMG attached: `gh release create vX.Y.Z iQualize-X.Y.Z.dmg --title "vX.Y.Z — <short description>" --notes "..."`. Look at a recent release (`gh release view vX.Y.Z-1`) for the notes format — highlights list, a link to the CHANGELOG diff, and the Gatekeeper `xattr -dr com.apple.quarantine` install instructions.
 5. Publishing a Release (step 4) is a distinct public action from tagging (step 2) — confirm with the user separately before running `gh release create`, even if they already approved the tag.
 
@@ -42,14 +42,14 @@ When closing a task via PR, use "Fixes #N" in the PR body to auto-close the issu
 ## Build & Install
 
 ```bash
-bash install.sh          # builds, signs, installs to /Applications
+bash scripts/install.sh          # builds, signs, installs to /Applications
 open /Applications/iQualize.app
 ```
 
 ## Dev Workflow
 
 - Build with `swift build` (SPM, no Xcode project)
-- After code changes: `pkill -x iQualize; bash install.sh && open /Applications/iQualize.app`
+- After code changes: `pkill -x iQualize; bash scripts/install.sh && open /Applications/iQualize.app`
 - install.sh signs with `IQ_SIGN_IDENTITY` if set, else an installed "Apple Development" cert, else ad-hoc. Ad-hoc TCC grants pin the cdhash: no-op reinstalls keep it (the re-sign is deterministic), but any real code change gets a fresh TCC prompt — only a cert-based signature survives those
 - install.sh skips binary copies when the fresh build products match the hashes recorded in `Contents/Resources/build-hashes` at the last install. Installed binaries themselves never byte-match a fresh product — signing rewrites them — so don't compare against those
 
@@ -58,7 +58,7 @@ open /Applications/iQualize.app
 After every build+install, you MUST verify the app actually launches:
 
 ```bash
-pkill -x iQualize; bash install.sh && open /Applications/iQualize.app
+pkill -x iQualize; bash scripts/install.sh && open /Applications/iQualize.app
 sleep 2
 pgrep -x iQualize > /dev/null && echo "OK: app running" || echo "FAIL: app did not start"
 ```

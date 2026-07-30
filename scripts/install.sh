@@ -2,7 +2,7 @@
 # Build iQualize and install to /Applications
 set -e
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # Pick a signing identity: an explicit IQ_SIGN_IDENTITY (release CI sets this
 # to a Developer ID cert when configured), else a real Apple Development cert

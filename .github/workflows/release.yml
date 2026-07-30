@@ -62,7 +62,7 @@ jobs:
           echo "IQ_SIGN_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}" >> "$GITHUB_ENV"
 
       - name: Build the DMG (universal, verified)
-        run: bash create-dmg.sh
+        run: bash scripts/create-dmg.sh
 
       - name: Verify both architectures inside the DMG
         run: |
