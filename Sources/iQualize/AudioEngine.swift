@@ -55,6 +55,8 @@ private func renderCallback(
     let interleavedCount = frames * ch
     let bufferList = UnsafeMutableAudioBufferListPointer(audioBufferList)
 
+    // Preallocated in start() for the AU's maximumFramesPerSlice default;
+    // growing here on the audio thread is a never-expected fallback.
     if rtScratchCapacity < interleavedCount {
         rtScratchBuffer?.deallocate()
         rtScratchBuffer = .allocate(capacity: interleavedCount)
@@ -62,9 +64,10 @@ private func renderCallback(
     }
     guard let scratch = rtScratchBuffer else { return noErr }
 
-    let read = client.read(scratch, count: interleavedCount)
-    if read < interleavedCount {
-        scratch.advanced(by: read).initialize(repeating: 0.0, count: interleavedCount - read)
+    // All-or-nothing: a full drift-compensated block (#133), or silence
+    // while the ring seeds / after an underrun.
+    if client.readResampled(scratch, frames: frames) == 0 {
+        scratch.initialize(repeating: 0.0, count: interleavedCount)
     }
 
     for i in 0..<bufferList.count {
@@ -205,6 +208,13 @@ final class AudioEngine {
     var maxGainDB: Float = 12
     private(set) var outputSampleRate: Double = 48000
 
+    /// Capture-ring drift telemetry (#133) for the CLI status surface.
+    /// nil while the engine is stopped. Counters reset on every capture
+    /// (re)start — each start() builds a fresh CaptureClient.
+    func captureTelemetry() -> CaptureClient.Telemetry? {
+        captureClient?.telemetrySnapshot()
+    }
+
     init() {
         do {
             let deviceID = try getDefaultOutputDeviceID()
@@ -260,6 +270,15 @@ final class AudioEngine {
         self.outputSampleRate = sampleRate
         rtCaptureClient = client
         rtChannelCount = channels
+
+        // Preallocate the render scratch for the AU maximumFramesPerSlice
+        // default (4096) so the render callback never allocates in practice.
+        let scratchFloats = 4096 * Int(channels)
+        if rtScratchCapacity < scratchFloats {
+            rtScratchBuffer?.deallocate()
+            rtScratchBuffer = .allocate(capacity: scratchFloats)
+            rtScratchCapacity = scratchFloats
+        }
 
         os_log(.default, log: appLog,
                "capture helper sr: %{public}.0f  ch: %{public}u  output: %{public}@",

@@ -17,6 +17,7 @@ import CoreAudio
 import AudioToolbox
 import Darwin
 import Foundation
+import IQRingAtomics
 import os.log
 
 private let capLog = OSLog(subsystem: "com.iqualize", category: "capture-helper")
@@ -42,6 +43,9 @@ nonisolated(unsafe) var shmPath: String = "/tmp/iqualize-cap-\(getpid()).bin"
 nonisolated(unsafe) var shmFD: Int32 = -1
 nonisolated(unsafe) var shmTotalSize: size_t = 0
 nonisolated(unsafe) var headerPtr: UnsafeMutablePointer<SharedHeader>? = nil
+/// Points at headerPtr.pointee.writeHead — the one field published across
+/// processes with release semantics (see iq_ring_atomics.h).
+nonisolated(unsafe) var writeHeadFieldPtr: UnsafeMutablePointer<UInt64>? = nil
 nonisolated(unsafe) var dataPtr: UnsafeMutablePointer<Float>? = nil
 nonisolated(unsafe) var dataMask: UInt64 = 0
 nonisolated(unsafe) var tapID = AudioObjectID(kAudioObjectUnknown)
@@ -382,6 +386,9 @@ func run() {
         channels: channels,
         capacityFloats: UInt32(dataFloatsPow2)
     )
+    writeHeadFieldPtr = mapped
+        .advanced(by: MemoryLayout<SharedHeader>.offset(of: \.writeHead)!)
+        .assumingMemoryBound(to: UInt64.self)
     dataPtr = mapped.advanced(by: headerSize).bindMemory(to: Float.self, capacity: dataFloatsPow2)
     memset(dataPtr, 0, dataBytes)
 
@@ -420,10 +427,12 @@ func run() {
     }
 
     let ioBlock: AudioDeviceIOBlock = { _, inInputData, _, outOutputData, _ in
-        guard let header = headerPtr, let data = dataPtr else { return }
+        guard let header = headerPtr, let data = dataPtr,
+              let writeHeadField = writeHeadFieldPtr else { return }
         let mask = dataMask
 
         let inBufList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inInputData))
+        // Plain load: this IOProc thread is the only writer of writeHead.
         var writeHead = header.pointee.writeHead
 
         for i in 0..<inBufList.count {
@@ -435,7 +444,9 @@ func run() {
                 writeHead &+= 1
             }
         }
-        header.pointee.writeHead = writeHead
+        // Release-store pairs with the reader's acquire-load: the sample
+        // stores above must be visible before the advanced head is.
+        iq_store_release_u64(writeHeadField, writeHead)
 
         let outBufList = UnsafeMutableAudioBufferListPointer(outOutputData)
         for i in 0..<outBufList.count {

@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Measure the RMS level (dBFS) of a single test tone in a 16-bit mono WAV.
 
-Goertzel per 1-second block, power-averaged across blocks. Two deliberate
-properties:
+Default mode: Goertzel per 1-second block, power-averaged across blocks. Two
+deliberate properties:
 - 1 s blocks put an integer-Hz tone exactly on a bin (no scalloping), and
-  incoherent (power) averaging keeps occasional sub-ms ring-buffer slips in
-  the capture path from reading as level loss — a phase jump only degrades
-  the one block it lands in. Coherent integration over the whole file would
-  punish a single slip by several dB.
+  incoherent (power) averaging is robust to phase discontinuities — a phase
+  jump only degrades the one block it lands in.
 - The ~1 Hz-wide detector means background music, speech, or noise on the
   capture doesn't move the reading the way wideband RMS does.
 
-Usage: goertzel.py capture.wav 997
+--coherent mode: a single Goertzel over the largest whole-second prefix.
+Any phase discontinuity in the window — a ring slip under clock drift
+(#133), a tap restart, a dropped capture buffer — drags this reading down
+while leaving block mode nearly untouched. The difference between the two
+modes is therefore a direct phase-coherence check on the capture path.
+
+Usage: goertzel.py capture.wav 997 [--coherent]
 """
 import math
 import struct
@@ -19,6 +23,7 @@ import sys
 import wave
 
 path, freq = sys.argv[1], float(sys.argv[2])
+coherent = "--coherent" in sys.argv[3:]
 w = wave.open(path)
 if w.getsampwidth() != 2 or w.getnchannels() != 1:
     sys.exit("expected 16-bit mono WAV")
@@ -38,13 +43,20 @@ def block_rms(block, k):
     amp = 2.0 * math.sqrt(max(power, 1e-30)) / m
     return amp / math.sqrt(2.0)
 
-blocks = max(1, n // sr)
-powers = []
-for b in range(blocks):
-    block = x[b * sr:(b + 1) * sr]
+def measure(block):
     k0 = round(freq * len(block) / sr)
-    rms = max(block_rms(block, k) for k in range(k0 - 1, k0 + 2))
-    powers.append(rms * rms)
+    return max(block_rms(block, k) for k in range(k0 - 1, k0 + 2))
 
-mean_rms = math.sqrt(sum(powers) / len(powers))
+if coherent:
+    # Whole-second prefix keeps the integer-Hz tone bin-exact.
+    prefix = max(1, n // sr) * sr
+    mean_rms = measure(x[:min(prefix, n)])
+else:
+    blocks = max(1, n // sr)
+    powers = []
+    for b in range(blocks):
+        rms = measure(x[b * sr:(b + 1) * sr])
+        powers.append(rms * rms)
+    mean_rms = math.sqrt(sum(powers) / len(powers))
+
 print(f"{20 * math.log10(max(mean_rms, 1e-15)):.2f}")
