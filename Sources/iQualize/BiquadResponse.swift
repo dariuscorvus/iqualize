@@ -5,41 +5,11 @@ import Foundation
 struct BiquadCoefficients: Sendable {
     let b0: Double, b1: Double, b2: Double
     let a0: Double, a1: Double, a2: Double
-
-    /// Evaluate the filter's gain in dB at a given frequency.
-    func gainDB(at frequency: Double, sampleRate: Double) -> Double {
-        let w = 2.0 * .pi * frequency / sampleRate
-        let cosW = cos(w), sinW = sin(w)
-        let cos2W = cos(2.0 * w), sin2W = sin(2.0 * w)
-
-        // Normalize by a0
-        let nb0 = b0 / a0, nb1 = b1 / a0, nb2 = b2 / a0
-        let na1 = a1 / a0, na2 = a2 / a0
-
-        let numReal = nb0 + nb1 * cosW + nb2 * cos2W
-        let numImag = -(nb1 * sinW + nb2 * sin2W)
-        let denReal = 1.0 + na1 * cosW + na2 * cos2W
-        let denImag = -(na1 * sinW + na2 * sin2W)
-
-        let numMagSq = numReal * numReal + numImag * numImag
-        let denMagSq = denReal * denReal + denImag * denImag
-
-        guard denMagSq > 1e-30 else { return -120.0 }
-        return 10.0 * log10(numMagSq / denMagSq)
-    }
 }
 
 // MARK: - Biquad Response Computation
 
 enum BiquadResponse {
-
-    /// Generate log-spaced frequencies from 20 Hz to 20 kHz.
-    static func logFrequencies(count: Int = 512) -> [Double] {
-        (0..<count).map { i in
-            let t = Double(i) / Double(count - 1)
-            return 20.0 * pow(1000.0, t)
-        }
-    }
 
     /// Compute biquad coefficients for a band using Audio EQ Cookbook formulas.
     static func coefficients(for band: EQBand, sampleRate: Double) -> BiquadCoefficients {
@@ -132,24 +102,6 @@ enum BiquadResponse {
                 a1: -2.0 * cosW0,
                 a2: 1.0 - alpha
             )
-        }
-    }
-
-    /// Composite frequency response: sum of all bands' dB contributions.
-    static func compositeResponse(
-        bands: [EQBand], sampleRate: Double, frequencies: [Double]
-    ) -> [Double] {
-        guard !bands.isEmpty else {
-            return [Double](repeating: 0.0, count: frequencies.count)
-        }
-
-        let allCoeffs = bands.map { coefficients(for: $0, sampleRate: sampleRate) }
-        return frequencies.map { freq in
-            var total = 0.0
-            for coeffs in allCoeffs {
-                total += coeffs.gainDB(at: freq, sampleRate: sampleRate)
-            }
-            return total
         }
     }
 }

@@ -507,8 +507,8 @@ struct EQCanvasView: View {
         case .bandwidth:
             let dxFrac = (p.x - drag.startX) / W
             let dir: Double = (drag.side == .right) ? 1 : -1
-            let newQ = max(0.05, min(8.0, Double(drag.startQ) - dir * Double(dxFrac) * 4))
-            vm.updateBand(id: drag.bandID, bandwidth: Float(newQ))
+            let newQ = drag.startQ - Float(dir * Double(dxFrac) * 4)
+            vm.updateBand(id: drag.bandID, bandwidth: newQ.clamped(to: EQBand.bandwidthRange))
         }
     }
 
