@@ -9,7 +9,7 @@ private let appLog = OSLog(subsystem: "com.iqualize", category: "audio")
 
 /// Locate the capture helper executable inside the app bundle. Built as
 /// `iQualizeCapture` and installed at `Contents/Helpers/iQualizeCapture` by
-/// install.sh. See CONTINUITY.md for why capture lives in a separate process.
+/// install.sh. See docs/CONTINUITY.md for why capture lives in a separate process.
 func captureHelperURL() -> URL {
     Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/iQualizeCapture")
 }
@@ -121,7 +121,7 @@ func deinterleaveChannel(
 final class AudioEngine {
     /// AVAudioUnitEQ's own native band capacity — an AudioEngine implementation
     /// detail, not a user-facing limit. See the comment at its allocation in start(),
-    /// and EQ_BAND_CAPACITY.md for why this can't just be raised.
+    /// and docs/EQ_BAND_CAPACITY.md for why this can't just be raised.
     private static let avEQNativeBandCount = 31
 
     private(set) var isRunning = false
@@ -133,7 +133,7 @@ final class AudioEngine {
     // Sources/iQualizeCapture/main.swift). This main process owns no CATap,
     // no aggregate, no IOProc — only the AVAudioEngine output. That separation
     // is what lets Continuity preempt our render the way it preempts Spotify.
-    // See CONTINUITY.md.
+    // See docs/CONTINUITY.md.
     private var captureClient: CaptureClient?
     private var engine: AVAudioEngine?
     private var eq: AVAudioUnitEQ?
@@ -262,7 +262,7 @@ final class AudioEngine {
         //    and IOProc in a separate process. We just consume its shared-memory
         //    ring buffer. This is the architectural fix for AirPods Continuity
         //    handoff: by not having a CATap in this process, Continuity's
-        //    preemption can release our render from the AirPods (see CONTINUITY.md).
+        //    preemption can release our render from the AirPods (see docs/CONTINUITY.md).
         let client = CaptureClient()
         client.onUnexpectedTermination = { [weak self] in
             guard let self else { return }

@@ -66,7 +66,7 @@ CLI_HASH=$(hash_of "$CLI_SRC")
 # Install + sign the capture helper FIRST (the main binary's enclosing
 # signature covers the helper, so the helper must already be in place when
 # we sign the main bundle below). It owns the CATap + aggregate IOProc in a
-# separate process — see CONTINUITY.md. The explicit --identifier matters:
+# separate process — see docs/CONTINUITY.md. The explicit --identifier matters:
 # without it, codesign derives one from the Mach-O UUID, which changes on
 # every relink and would break a cert-based TCC grant across rebuilds.
 if [ -f "$HELPER_BIN" ] && [ "$HELPER_HASH" = "$(recorded helper)" ]; then

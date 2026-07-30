@@ -5,7 +5,7 @@
 // reads captured audio from a shared-memory ring buffer this helper fills.
 //
 // Why separate processes:
-// Empirically (see CONTINUITY.md, 2026-05-28 experiments), a process that
+// Empirically (see docs/CONTINUITY.md, 2026-05-28 experiments), a process that
 // both (a) owns an active CATap and (b) has a render IOProc on the same
 // output device is treated by coreaudiod as non-preemptible by Continuity.
 // Killing the iQualize process instantly frees the AirPods for handoff;

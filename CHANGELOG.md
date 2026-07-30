@@ -162,7 +162,7 @@ All notable changes to iQualize will be documented in this file.
 - AirPods Continuity handoff now works while EQ is enabled — switch between Mac and iPhone mid-playback the same way you would with any other app, no need to quit iQualize or manually reroute output first (#71)
 
 ### Fixed
-- AirPods stopped auto-switching to iPhone (Continuity handoff) while EQ was enabled, even mid-playback on the Mac. The system audio tap now runs in a separate helper process instead of alongside the render engine — a process that owns both an active tap and a render stream on the same output device is treated by coreaudiod as non-preemptible infrastructure, which silently blocked the handoff. See `CONTINUITY.md` for the full investigation.
+- AirPods stopped auto-switching to iPhone (Continuity handoff) while EQ was enabled, even mid-playback on the Mac. The system audio tap now runs in a separate helper process instead of alongside the render engine — a process that owns both an active tap and a render stream on the same output device is treated by coreaudiod as non-preemptible infrastructure, which silently blocked the handoff. See `docs/CONTINUITY.md` for the full investigation.
 
 ## [0.40.1] - 2026-07-12
 
