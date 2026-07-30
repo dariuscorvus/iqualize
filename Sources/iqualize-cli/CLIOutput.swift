@@ -42,7 +42,7 @@ func formatVersion(_ status: CLIStatusPayload) -> String {
 
 func formatStatus(_ status: CLIStatusPayload) -> String {
     let mode = status.gainIsGlobal ? "shared" : "per-preset"
-    return """
+    var lines = """
     Version: \(formatVersion(status))
     Capture: \(status.isRunning ? "on" : "off")
     Bypass: \(status.bypassed ? "on" : "off")
@@ -54,4 +54,14 @@ func formatStatus(_ status: CLIStatusPayload) -> String {
     Post-EQ spectrum: \(status.postEqSpectrumEnabled ? "on" : "off")
     Output device: \(status.outputDeviceName)
     """
+    // Drift telemetry (#133); absent while the engine is stopped or from
+    // older apps. Counters reset on every capture (re)start.
+    if let fill = status.captureFillFrames,
+       let ppm = status.captureDriftPpm,
+       let underruns = status.captureUnderruns,
+       let resyncs = status.captureOverrunResyncs {
+        lines += "\n" + String(format: "Capture: fill %d frames, drift %+.1f ppm, underruns %d, resyncs %d",
+                               fill, ppm, underruns, resyncs)
+    }
+    return lines
 }

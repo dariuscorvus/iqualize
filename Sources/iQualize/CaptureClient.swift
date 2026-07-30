@@ -8,12 +8,14 @@
 
 import Foundation
 import Darwin
+import IQRingAtomics
 import os.log
 
 private let clientLog = OSLog(subsystem: "com.iqualize", category: "capture-client")
 
 // Must match Sources/iQualizeCapture/main.swift exactly.
-private struct SharedHeader {
+// Internal (not private) so the resampler tests can build a synthetic ring.
+struct SharedHeader {
     var writeHead: UInt64
     var readHead: UInt64
     var sampleRate: Float64
@@ -39,6 +41,67 @@ final class CaptureClient: @unchecked Sendable {
     private var dataPtr: UnsafeMutablePointer<Float>?
     private var mask: UInt64 = 0
     private var intentionallyStopping: Bool = false
+
+    // Cached field pointers into the shared header, so every cross-process
+    // atomic access goes through one audited pointer per field.
+    private var writeHeadPtr: UnsafeMutablePointer<UInt64>?
+    private var readHeadPtr: UnsafeMutablePointer<UInt64>?
+    private var capacityFrames: Int = 0
+    private var baseTargetFill: Int = 0
+
+    // Drift-compensator state (#133). Render-thread-only, same single-consumer
+    // contract as the old read(): no synchronization needed.
+    private enum DriftState { case seeding, running }
+    private var driftState: DriftState = .seeding
+    /// Absolute source read position: integer frames + fraction in [0, 1).
+    /// Kept split (not one Double) so precision never degrades with uptime.
+    private var srcFrame: UInt64 = 0
+    private var srcFrac: Double = 0
+    private var fillEMA: Double = 0
+    /// Head position when we entered .seeding. Re-seeding waits until the
+    /// writer has produced a full target *beyond* this, so recovery always
+    /// lands on fresh audio — gating on the absolute head would re-seed
+    /// instantly against a stalled writer and loop-replay the last ~2 s.
+    private var seedFloorFrames: UInt64 = 0
+    /// High-water mark of callback sizes. The effective target is at least
+    /// 2× this, so a pathologically large slice (e.g. 4096 frames) re-seeds
+    /// once at a workable fill instead of latching into permanent underrun.
+    private var maxCallbackFrames: Int = 0
+
+    // Telemetry, published from the render thread with relaxed stores and
+    // read by telemetrySnapshot() on any thread. Counters reset whenever a
+    // new CaptureClient is built — i.e. on every capture (re)start.
+    private let telemetrySlots: UnsafeMutablePointer<UInt64> = {
+        let p = UnsafeMutablePointer<UInt64>.allocate(capacity: 4)
+        p.initialize(repeating: 0, count: 4)
+        return p
+    }()
+    private enum TelemetrySlot {
+        static let fillFrames = 0
+        static let driftPpmBits = 1
+        static let underruns = 2
+        static let overrunResyncs = 3
+    }
+
+    struct Telemetry: Sendable {
+        var fillFrames: Int
+        var driftPpm: Double
+        var underruns: UInt64
+        var overrunResyncs: UInt64
+    }
+
+    func telemetrySnapshot() -> Telemetry {
+        Telemetry(
+            fillFrames: Int(truncatingIfNeeded: iq_load_relaxed_u64(telemetrySlots + TelemetrySlot.fillFrames)),
+            driftPpm: Double(bitPattern: iq_load_relaxed_u64(telemetrySlots + TelemetrySlot.driftPpmBits)),
+            underruns: iq_load_relaxed_u64(telemetrySlots + TelemetrySlot.underruns),
+            overrunResyncs: iq_load_relaxed_u64(telemetrySlots + TelemetrySlot.overrunResyncs)
+        )
+    }
+
+    deinit {
+        telemetrySlots.deallocate()
+    }
 
     /// Launches the helper, reads the handshake, maps its shared memory.
     /// Throws if anything fails — caller should treat as a hard error.
@@ -136,18 +199,42 @@ final class CaptureClient: @unchecked Sendable {
         // a predictable, world-writable path in /tmp is reachable by name.
         _ = shmPath.withCString { unlink($0) }
 
-        headerPtr = mapped.bindMemory(to: SharedHeader.self, capacity: 1)
-        dataPtr = mapped.advanced(by: headerSize)
-            .bindMemory(to: Float.self, capacity: capFloats)
-
-        sampleRate = sr
-        channels = UInt32(ch)
-        capacityFloats = UInt32(capFloats)
-        mask = UInt64(capFloats - 1)
+        attach(region: mapped, headerSize: headerSize,
+               capacityFloats: capFloats, sampleRate: sr, channels: UInt32(ch))
 
         os_log(.default, log: clientLog,
-               "capture helper ready: pid=%{public}d sr=%{public}.0f ch=%{public}u cap=%{public}d",
-               proc.processIdentifier, sr, UInt32(ch), capFloats)
+               "capture helper ready: pid=%{public}d sr=%{public}.0f ch=%{public}u cap=%{public}d target=%{public}d",
+               proc.processIdentifier, sr, UInt32(ch), capFloats, baseTargetFill)
+    }
+
+    /// Binds an already-mapped ring region and derives the drift-compensator
+    /// parameters. Split out of start() so the resampler tests can drive a
+    /// synthetic ring they allocate themselves — no helper process, no mmap.
+    func attach(region: UnsafeMutableRawPointer, headerSize: Int,
+                capacityFloats capFloats: Int, sampleRate sr: Float64, channels ch: UInt32) {
+        headerPtr = region.bindMemory(to: SharedHeader.self, capacity: 1)
+        dataPtr = region.advanced(by: headerSize)
+            .bindMemory(to: Float.self, capacity: capFloats)
+        writeHeadPtr = region
+            .advanced(by: MemoryLayout<SharedHeader>.offset(of: \.writeHead)!)
+            .assumingMemoryBound(to: UInt64.self)
+        readHeadPtr = region
+            .advanced(by: MemoryLayout<SharedHeader>.offset(of: \.readHead)!)
+            .assumingMemoryBound(to: UInt64.self)
+
+        sampleRate = sr
+        channels = ch
+        capacityFloats = UInt32(capFloats)
+        mask = UInt64(capFloats - 1)
+        capacityFrames = capFloats / Int(ch)
+        baseTargetFill = DriftPolicy.targetFillFrames(sampleRate: sr, capacityFrames: capacityFrames)
+
+        driftState = .seeding
+        seedFloorFrames = 0
+        srcFrame = 0
+        srcFrac = 0
+        fillEMA = 0
+        maxCallbackFrames = 0
     }
 
     func stop() {
@@ -170,30 +257,121 @@ final class CaptureClient: @unchecked Sendable {
         }
         headerPtr = nil
         dataPtr = nil
+        writeHeadPtr = nil
+        readHeadPtr = nil
     }
 
-    /// Read up to `count` interleaved Float32 samples. Returns the actual
-    /// count read (less than `count` on underrun). Safe to call from the
-    /// AVAudioEngine render thread — only touches mmap'd memory, no syscalls.
-    func read(_ dest: UnsafeMutablePointer<Float>, count: Int) -> Int {
-        guard let header = headerPtr, let data = dataPtr else { return 0 }
-        let writeHead = header.pointee.writeHead
-        var readHead = header.pointee.readHead
-        let capacity = UInt64(capacityFloats)
-        // If the reader fell more than `capacity` samples behind the writer,
-        // the writer has wrapped over data we never read. Skip forward so we
-        // start at recent audio instead of returning corrupted (wrapped) data.
-        if writeHead &- readHead > capacity {
-            readHead = writeHead &- capacity
+    /// Drift-compensated read for the render callback (#133): pulls `frames`
+    /// interleaved frames from the ring, resampling by a ratio a hair off 1.0
+    /// (Catmull-Rom, fill-level P-controller — see DriftPolicy) so the two
+    /// unlocked device clocks never walk the ring into an edge.
+    ///
+    /// All-or-nothing: returns `frames` with `dest` fully written, or 0 while
+    /// seeding / after an underrun (caller outputs silence). Render thread
+    /// only. Only touches mapped memory — no syscalls, no allocation.
+    func readResampled(_ dest: UnsafeMutablePointer<Float>, frames: Int) -> Int {
+        guard let data = dataPtr, let writeHeadField = writeHeadPtr,
+              let readHeadField = readHeadPtr, frames > 0 else { return 0 }
+        let ch = Int(channels)
+        let chU = UInt64(channels)
+
+        // One acquire-load snapshot per callback, paired with the helper's
+        // release-store: every sample behind this head is visible. Floor to
+        // whole frames; a torn partial frame at the head is treated as
+        // unwritten.
+        let writeFrames = iq_load_acquire_u64(writeHeadField) / chU
+
+        if frames > maxCallbackFrames { maxCallbackFrames = frames }
+        let effTarget = max(baseTargetFill, 2 * maxCallbackFrames)
+
+        if driftState == .seeding {
+            // Wait for a full target of audio past the seed floor (+1 so the
+            // interpolator's left neighbor exists), then start exactly
+            // `effTarget` behind the writer — the operating point is chosen,
+            // not startup-race-determined.
+            guard writeFrames >= seedFloorFrames &+ UInt64(effTarget) &+ 1 else {
+                iq_store_relaxed_u64(telemetrySlots + TelemetrySlot.fillFrames, 0)
+                iq_store_relaxed_u64(telemetrySlots + TelemetrySlot.driftPpmBits, Double(0).bitPattern)
+                return 0
+            }
+            srcFrame = DriftPolicy.seedPosition(writeFrames: writeFrames, targetFill: effTarget)
+            srcFrac = 0
+            fillEMA = Double(effTarget)
+            driftState = .running
         }
-        let avail = Int(writeHead &- readHead)
-        let toRead = min(count, avail)
+
+        var fill = Double(writeFrames &- srcFrame) - srcFrac
+
+        // Reader stalled long enough for the backlog to exceed the overrun
+        // threshold: jump back to target rather than splicing out minutes of
+        // backlog at 500 ppm. Instantaneous check — a stall is a step, not
+        // drift, so the EMA must not see it.
+        let overrunThreshold = DriftPolicy.overrunThresholdFrames(
+            targetFill: effTarget, capacityFrames: capacityFrames)
+        if fill > Double(overrunThreshold) {
+            iq_store_relaxed_u64(telemetrySlots + TelemetrySlot.overrunResyncs,
+                                 iq_load_relaxed_u64(telemetrySlots + TelemetrySlot.overrunResyncs) &+ 1)
+            srcFrame = DriftPolicy.seedPosition(writeFrames: writeFrames, targetFill: effTarget)
+            srcFrac = 0
+            fillEMA = Double(effTarget)
+            fill = Double(effTarget)
+        }
+
+        // The fill this callback measured (post-reseed if one happened) — the
+        // quantity the controller regulates, and what telemetry reports.
+        let measuredFill = fill
+
+        let alpha = DriftPolicy.emaAlpha(frames: frames, sampleRate: sampleRate)
+        fillEMA += alpha * (fill - fillEMA)
+        let ratio = DriftPolicy.resampleRatio(fillEMA: fillEMA, targetFill: Double(effTarget),
+                                              sampleRate: sampleRate)
+
+        // Source span this callback will touch, including the interpolator's
+        // +2 lookahead. Not enough data means the writer stalled — the target
+        // is ~4× a normal callback, so this is never tight timing. Zero-fill,
+        // count once, and wait in .seeding for fresh post-stall audio.
+        let span = UInt64(Double(frames) * ratio + srcFrac) &+ UInt64(DriftPolicy.windowMarginFrames)
+        if srcFrame &+ span >= writeFrames {
+            iq_store_relaxed_u64(telemetrySlots + TelemetrySlot.underruns,
+                                 iq_load_relaxed_u64(telemetrySlots + TelemetrySlot.underruns) &+ 1)
+            driftState = .seeding
+            seedFloorFrames = writeFrames
+            iq_store_relaxed_u64(telemetrySlots + TelemetrySlot.fillFrames, 0)
+            return 0
+        }
+
+        // Interpolating copy. No separate history buffer: the ring behind the
+        // read position stays valid for capacity − fill ≈ 300 ms, so x[-1] is
+        // always resident, and the span check above bounds x[+2].
+        var idx = srcFrame
+        var frac = srcFrac
         let m = mask
-        for i in 0..<toRead {
-            dest[i] = data[Int(readHead & m)]
-            readHead &+= 1
+        for f in 0..<frames {
+            let t = Float(frac)
+            let base = (idx &- 1) &* chU
+            for c in 0..<ch {
+                let cU = UInt64(c)
+                let xm1 = data[Int((base &+ cU) & m)]
+                let x0 = data[Int((base &+ chU &+ cU) & m)]
+                let x1 = data[Int((base &+ 2 &* chU &+ cU) & m)]
+                let x2 = data[Int((base &+ 3 &* chU &+ cU) & m)]
+                dest[f * ch + c] = DriftPolicy.catmullRom(xm1, x0, x1, x2, t)
+            }
+            frac += ratio
+            let carry = Int(frac)   // 0 or 1: ratio ≤ 1 + 500 ppm
+            idx &+= UInt64(carry)
+            frac -= Double(carry)
         }
-        header.pointee.readHead = readHead
-        return toRead
+        srcFrame = idx
+        srcFrac = frac
+
+        // Floor of the fractional position, release-published for symmetry
+        // and tooling — the writer never reads it.
+        iq_store_release_u64(readHeadField, srcFrame &* chU)
+        iq_store_relaxed_u64(telemetrySlots + TelemetrySlot.fillFrames,
+                             UInt64(max(0, measuredFill.rounded())))
+        iq_store_relaxed_u64(telemetrySlots + TelemetrySlot.driftPpmBits,
+                             ((ratio - 1) * 1e6).bitPattern)
+        return frames
     }
 }

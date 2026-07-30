@@ -22,25 +22,33 @@
 # Needs: brew install sox blackhole-16ch (blackhole-2ch for the stereo
 # control run: ./e2e-tap-test.sh "BlackHole 2ch"). First run triggers a
 # macOS microphone-permission prompt — deny it and the capture is silent.
-# Takes over the default output for ~20 s and restarts iQualize; restores
+# Takes over the default output for ~40 s and restarts iQualize; restores
 # both on exit.
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 DEVICE="${1:-BlackHole 16ch}"
-SINE="$DIR/sine997.wav"
+# 16 s tone: the measurement window is the LAST 4 s of a 12 s capture. afplay
+# and sox are themselves new Core Audio processes, and iQualize restarts its
+# tap when the process list grows (#87, 2 s poll) — so the first ~4 s of every
+# through-iQualize capture contain up to two full tap restarts, each splicing
+# ~100 ms of silence. Block averaging shrugged that off; the #133 coherence
+# check cannot. Measuring the tail keeps the tooling's own restarts out of
+# the window.
+SINE="$DIR/sine997-16s.wav"
 APP=/Applications/iQualize.app
 
 command -v sox >/dev/null || { echo "FAIL: sox not installed (brew install sox)"; exit 1; }
 [ -x "$DIR/setoutput" ] && [ "$DIR/setoutput" -nt "$DIR/setoutput.swift" ] \
     || swiftc -O -framework CoreAudio -o "$DIR/setoutput" "$DIR/setoutput.swift" || exit 1
-[ -f "$SINE" ] || python3 "$DIR/gen_sine.py" "$SINE" || exit 1
+[ -f "$SINE" ] || python3 "$DIR/gen_sine.py" "$SINE" 16 || exit 1
 "$DIR/setoutput" 2>/dev/null | grep -qi "${DEVICE}" \
     || { echo "FAIL: output device \"$DEVICE\" not found (brew install --cask blackhole-16ch)"; exit 1; }
 
-rms() { # capture 4s from $DEVICE (ch 1+2), measure the 997 Hz test tone via
-        # a Goertzel bin — sub-Hz selectivity, so background playback on the
-        # machine can't skew the reading
-    sox -q -t coreaudio "$DEVICE" -b 16 "$DIR/.cap.wav" trim 0 4 remix 1,2 2>/dev/null
+rms() { # capture 12 s from $DEVICE (ch 1+2), keep the last 4 s (see the SINE
+        # comment above), measure the 997 Hz test tone via a Goertzel bin —
+        # sub-Hz selectivity, so background playback can't skew the reading
+    sox -q -t coreaudio "$DEVICE" -b 16 "$DIR/.cap-full.wav" trim 0 12 remix 1,2 2>/dev/null
+    sox -q "$DIR/.cap-full.wav" "$DIR/.cap.wav" trim -4 2>/dev/null
     python3 "$DIR/goertzel.py" "$DIR/.cap.wav" 997
 }
 
@@ -84,14 +92,25 @@ sleep 1.5
 THROUGH=$(play_and_measure)
 echo "iQualize RMS (bypass on):   ${THROUGH} dB"
 
-# Tolerance 3 dB: the capture pipeline's ring buffer occasionally slips a
-# sub-ms chunk (clock drift between the tap aggregate and the render device),
-# which adds up to ~±2 dB of run-to-run jitter on this measurement — verified
-# present on builds before and after #131. Every real failure mode this test
-# guards against (missed stereo-pair step, lost compensation, call ducking)
-# is 6 dB or more.
+# Tolerance 1 dB. It was 3 dB to absorb ~±2 dB of run-to-run jitter that
+# turned out to be mid-window tap restarts (see the SINE comment) — with the
+# measurement window past the restarts and the ring drift-compensated (#133)
+# the reading is stable, and every real failure mode this test guards against
+# (missed stereo-pair step, lost compensation, call ducking) is 6 dB or more.
 DELTA=$(echo "$THROUGH $BASELINE" | awk '{printf "%+.2f", $1 - $2}')
 echo "delta:                      ${DELTA} dB"
-echo "$DELTA" | awk '{d=$1; if (d<0) d=-d; exit !(d<=3.0)}' \
-    && echo "PASS: unity within 3 dB — OS attenuation exists and is fully compensated" \
+echo "$DELTA" | awk '{d=$1; if (d<0) d=-d; exit !(d<=1.0)}' \
+    && echo "PASS: unity within 1 dB — OS attenuation exists and is fully compensated" \
     || echo "FAIL: not unity — see delta (positive = over-boost, negative = under-compensation)"
+
+# --- phase coherence through the capture ring (#133) ---
+# .cap.wav still holds the iQualize-path capture. Coherent whole-window
+# integration must agree with the block-averaged reading: any phase break in
+# the window — a ring slip under clock drift, a tap restart — drags the
+# coherent number down while barely moving the block average.
+COHERENT=$(python3 "$DIR/goertzel.py" "$DIR/.cap.wav" 997 --coherent)
+CDELTA=$(echo "$THROUGH $COHERENT" | awk '{printf "%+.2f", $1 - $2}')
+echo "coherent RMS (same capture): ${COHERENT} dB (block - coherent = ${CDELTA} dB)"
+echo "$CDELTA" | awk '{d=$1; if (d<0) d=-d; exit !(d<=0.5)}' \
+    && echo "PASS: phase-coherent — no ring slips in the capture path" \
+    || echo "FAIL: coherent reading diverges — the capture ring is slipping (#133 regression)"

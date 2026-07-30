@@ -150,8 +150,18 @@ public struct CLIStatusPayload: Codable, Sendable {
     /// Git commit the app was built from (IQGitCommit, stamped by install.sh).
     /// nil for unstamped builds (e.g. plain `swift build` outside a git checkout).
     public var gitCommit: String?
+    /// Capture-ring drift telemetry (#133). All nil when the engine is
+    /// stopped or the app predates the fields. The counters reset on every
+    /// capture (re)start — device switches, sleep/wake, and config changes
+    /// each build a fresh capture client.
+    public var captureFillFrames: Int?
+    /// Applied drift correction in ppm (positive = reader consuming faster
+    /// than nominal).
+    public var captureDriftPpm: Double?
+    public var captureUnderruns: UInt64?
+    public var captureOverrunResyncs: UInt64?
 
-    public init(bypassed: Bool, activePresetID: UUID, activePresetName: String, inputGainDB: Float, outputGainDB: Float, balance: Float, gainIsGlobal: Bool, outputDeviceName: String, isRunning: Bool, peakLimiter: Bool, preEqSpectrumEnabled: Bool, postEqSpectrumEnabled: Bool, appVersion: String? = nil, gitCommit: String? = nil) {
+    public init(bypassed: Bool, activePresetID: UUID, activePresetName: String, inputGainDB: Float, outputGainDB: Float, balance: Float, gainIsGlobal: Bool, outputDeviceName: String, isRunning: Bool, peakLimiter: Bool, preEqSpectrumEnabled: Bool, postEqSpectrumEnabled: Bool, appVersion: String? = nil, gitCommit: String? = nil, captureFillFrames: Int? = nil, captureDriftPpm: Double? = nil, captureUnderruns: UInt64? = nil, captureOverrunResyncs: UInt64? = nil) {
         self.bypassed = bypassed
         self.activePresetID = activePresetID
         self.activePresetName = activePresetName
@@ -166,6 +176,10 @@ public struct CLIStatusPayload: Codable, Sendable {
         self.postEqSpectrumEnabled = postEqSpectrumEnabled
         self.appVersion = appVersion
         self.gitCommit = gitCommit
+        self.captureFillFrames = captureFillFrames
+        self.captureDriftPpm = captureDriftPpm
+        self.captureUnderruns = captureUnderruns
+        self.captureOverrunResyncs = captureOverrunResyncs
     }
 }
 

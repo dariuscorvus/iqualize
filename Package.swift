@@ -14,6 +14,15 @@ let package = Package(
             name: "IQControlProtocol",
             path: "Sources/IQControlProtocol"
         ),
+        // C shim for the capture ring's cross-process head publication
+        // (#133): release-store / acquire-load on the shared header's 64-bit
+        // head fields. C because the macOS 14 floor rules out
+        // Synchronization.Atomic and swift-atomics is a heavy dependency for
+        // four functions.
+        .target(
+            name: "IQRingAtomics",
+            path: "Sources/IQRingAtomics"
+        ),
         // Named "iqualize-cli", not "iqualize" — a same-named target would collide with
         // the "iQualize" app target's binary on macOS's default case-insensitive filesystem.
         // install.sh renames the built binary to "iqualize" when it copies it into place.
@@ -30,6 +39,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Markdown", package: "swift-markdown"),
                 "IQControlProtocol",
+                "IQRingAtomics",
             ],
             path: "Sources/iQualize",
             exclude: ["Info.plist"],
@@ -54,6 +64,7 @@ let package = Package(
         // Continuity (just like Spotify). See CONTINUITY.md.
         .executableTarget(
             name: "iQualizeCapture",
+            dependencies: ["IQRingAtomics"],
             path: "Sources/iQualizeCapture",
             linkerSettings: [
                 .linkedFramework("CoreAudio"),
