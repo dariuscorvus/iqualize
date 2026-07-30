@@ -118,7 +118,7 @@ struct DreamFooter: View {
                     onChange()
                 }
             )
-            Text(formatSigned(value.wrappedValue))
+            Text(formatDB(value.wrappedValue))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(theme.textDim)
                 .lineLimit(1)
@@ -218,10 +218,6 @@ struct DreamFooter: View {
     }
 
     // MARK: - Format
-
-    private func formatSigned(_ v: Float) -> String {
-        String(format: "%@%.1f dB", v >= 0 ? "+" : "", v)
-    }
 
     private func formatBalance(_ v: Float) -> String {
         if abs(v) < 0.01 { return "0" }

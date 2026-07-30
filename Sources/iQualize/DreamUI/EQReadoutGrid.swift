@@ -129,18 +129,18 @@ struct ReadoutCell: View {
             vm.updateBand(id: targetID, gain: newG)
         case .frequency:
             let factor = pow(2.0, dir * (shift ? (1.0 / 24.0) : (1.0 / 12.0)))
-            let newF = max(20, min(20000, current.frequency * Float(factor)))
+            let newF = (current.frequency * Float(factor)).clamped(to: EQBand.frequencyRange)
             vm.updateBand(id: targetID, frequency: newF)
         case .bandwidth:
             if vm.bandwidthDisplay == .oct {
                 let step: Float = shift ? 0.02 : 0.1
-                let newB = max(0.05, min(8, current.bandwidth + dir * step))
+                let newB = (current.bandwidth + dir * step).clamped(to: EQBand.bandwidthRange)
                 vm.updateBand(id: targetID, bandwidth: newB)
             } else {
                 let step: Float = shift ? 0.01 : 0.05
                 let curQ = Float(octavesToQ(Double(current.bandwidth)))
                 let newQ = max(0.05, min(20, curQ + dir * step))
-                let newB = max(0.05, min(8, Float(qToOctaves(Double(newQ)))))
+                let newB = Float(qToOctaves(Double(newQ))).clamped(to: EQBand.bandwidthRange)
                 vm.updateBand(id: targetID, bandwidth: newB)
             }
         }
@@ -191,13 +191,13 @@ struct ReadoutCell: View {
         case .frequency:
             // "1.5" → 1.5 kHz when small
             let v = raw < 100 ? raw * 1000 : raw
-            vm.updateBand(id: band.id, frequency: Float(max(20, min(20000, v))), registerUndo: true)
+            vm.updateBand(id: band.id, frequency: Float(v).clamped(to: EQBand.frequencyRange), registerUndo: true)
         case .bandwidth:
             if vm.bandwidthDisplay == .oct {
-                vm.updateBand(id: band.id, bandwidth: Float(max(0.05, min(8, raw))), registerUndo: true)
+                vm.updateBand(id: band.id, bandwidth: Float(raw).clamped(to: EQBand.bandwidthRange), registerUndo: true)
             } else {
                 let oct = qToOctaves(raw)
-                vm.updateBand(id: band.id, bandwidth: Float(max(0.05, min(8, oct))), registerUndo: true)
+                vm.updateBand(id: band.id, bandwidth: Float(oct).clamped(to: EQBand.bandwidthRange), registerUndo: true)
             }
         }
     }

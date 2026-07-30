@@ -2,7 +2,7 @@
 # Build iQualize and create a distributable DMG installer
 set -e
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Sources/iQualize/Info.plist)
 DMG_NAME="iQualize-${VERSION}.dmg"
@@ -12,7 +12,7 @@ echo "=== Building iQualize v${VERSION} ==="
 # Distributable DMGs are universal (Apple Silicon + Intel) unless overridden
 # with IQ_UNIVERSAL=0 for a quick local test build.
 export IQ_UNIVERSAL="${IQ_UNIVERSAL:-1}"
-bash install.sh
+bash scripts/install.sh
 
 if [ "$IQ_UNIVERSAL" = "1" ]; then
     for bin in \
@@ -85,7 +85,7 @@ echo ""
 echo "=== Verifying DMG ==="
 # Gate the build on a valid signature so a "damaged" DMG (issue #115) can never
 # be produced. set -e aborts create-dmg.sh if this fails.
-bash "$(dirname "$0")/verify-dmg.sh" "$DMG_NAME"
+bash scripts/verify-dmg.sh "$DMG_NAME"
 
 echo ""
 echo "=== Done: $DMG_NAME ==="

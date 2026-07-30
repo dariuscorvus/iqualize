@@ -517,9 +517,9 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         } else {
             type = .parametric
         }
-        let freq = frequency.map { max(20, min(20000, $0)) } ?? preset.suggestNewBandFrequency()
-        let newBand = EQBand(frequency: freq, gain: max(-24, min(24, gain ?? 0)),
-                              bandwidth: max(0.05, min(8.0, bandwidth ?? 1.0)), filterType: type)
+        let freq = frequency.map { $0.clamped(to: EQBand.frequencyRange) } ?? preset.suggestNewBandFrequency()
+        let newBand = EQBand(frequency: freq, gain: (gain ?? 0).clamped(to: EQBand.gainRange),
+                              bandwidth: (bandwidth ?? 1.0).clamped(to: EQBand.bandwidthRange), filterType: type)
         preset.bands.append(newBand)
         persistBandMutation(preset)
         return bandSummary(for: newBand, in: preset)
@@ -541,9 +541,9 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         guard let i = preset.bands.firstIndex(where: { $0.id == id }) else {
             throw CLIHandlerError(message: "band not found")
         }
-        if let f = frequency { preset.bands[i].frequency = max(20, min(20000, f)) }
-        if let g = gain { preset.bands[i].gain = max(-24, min(24, g)) }
-        if let b = bandwidth { preset.bands[i].bandwidth = max(0.05, min(8.0, b)) }
+        if let f = frequency { preset.bands[i].frequency = f.clamped(to: EQBand.frequencyRange) }
+        if let g = gain { preset.bands[i].gain = g.clamped(to: EQBand.gainRange) }
+        if let b = bandwidth { preset.bands[i].bandwidth = b.clamped(to: EQBand.bandwidthRange) }
         if let t = filterType {
             guard let parsed = FilterType(rawValue: t) else {
                 throw CLIHandlerError(message: "unrecognized filter type '\(t)'")

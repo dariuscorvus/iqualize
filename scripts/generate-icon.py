@@ -21,8 +21,9 @@ import tempfile
 from PIL import Image, ImageMath
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SVG_PATH = os.path.join(HERE, "iqualize-icon.svg")
-ICNS_PATH = os.path.join(HERE, "Sources", "iQualize", "AppIcon.icns")
+REPO_ROOT = os.path.dirname(HERE)
+SVG_PATH = os.path.join(REPO_ROOT, "assets", "iqualize-icon.svg")
+ICNS_PATH = os.path.join(REPO_ROOT, "Sources", "iQualize", "AppIcon.icns")
 
 # (iconset slot name, pixel size). 1024 is the master; the rest are downscales.
 SLOTS = [

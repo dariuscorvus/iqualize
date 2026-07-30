@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./icon.png" width="128" alt="iQualize app icon">
+  <img src="./assets/icon.png" width="128" alt="iQualize app icon">
 </p>
 
 # iQualize
@@ -7,7 +7,7 @@
 > macOS doesn't have a system-wide parametric EQ.
 > So I built one in a day.
 
-![iQualize at 04:57](./preview.webp)
+![iQualize at 04:57](./assets/preview.webp)
 
 Built at 04:57 in Bavaria, listening to [Opera by Ballarak](https://open.spotify.com/track/6EkjiVchNqlYHoc2YNMiaV) on a Teufel Concept E 5.1.
 That's the only explanation you need for why this exists.
@@ -50,7 +50,7 @@ Not comfortable with Terminal? On macOS Sequoia and Tahoe there's a GUI path: tr
 ### Build from source
 
 ```bash
-bash install.sh          # builds, signs, installs to /Applications
+bash scripts/install.sh          # builds, signs, installs to /Applications
 open /Applications/iQualize.app
 ```
 
@@ -185,7 +185,7 @@ script iQualize with it: Shortcuts, launchd jobs, keyboard-shortcut launchers, e
 **Setup (one-time):** open iQualize → Settings (Cmd+,) → General → **"Install Command
 Line Tool"**. This prompts for your admin password once and adds `iqualize` to your
 PATH. Open a **new** Terminal window afterward — a window that was already open won't
-pick it up. (Building from source instead? `install.sh` symlinks it automatically, no
+pick it up. (Building from source instead? `scripts/install.sh` symlinks it automatically, no
 button needed.)
 
 ```

@@ -333,12 +333,12 @@ final class DreamViewModel {
             return true
         case 124: // Right
             beginDrag()
-            updateBand(id: id, frequency: min(20000, band.frequency * Float(pow(2.0, 1.0 / 12.0))))
+            updateBand(id: id, frequency: (band.frequency * Float(pow(2.0, 1.0 / 12.0))).clamped(to: EQBand.frequencyRange))
             scheduleKeyCommit()
             return true
         case 123: // Left
             beginDrag()
-            updateBand(id: id, frequency: max(20, band.frequency / Float(pow(2.0, 1.0 / 12.0))))
+            updateBand(id: id, frequency: (band.frequency / Float(pow(2.0, 1.0 / 12.0))).clamped(to: EQBand.frequencyRange))
             scheduleKeyCommit()
             return true
         case 51, 117: // Backspace, Forward Delete
@@ -433,9 +433,9 @@ final class DreamViewModel {
         let cur = bands[i]
         // Clamp the requested values the same way the mutation will, so the no-op check below
         // compares apples to apples.
-        let newFreq = frequency.map { max(20, min(20000, $0)) }
+        let newFreq = frequency.map { $0.clamped(to: EQBand.frequencyRange) }
         let newGain = gain.map      { max(-gainClamp, min(gainClamp, $0)) }
-        let newBW   = bandwidth.map { max(0.05, min(8.0, $0)) }
+        let newBW   = bandwidth.map { $0.clamped(to: EQBand.bandwidthRange) }
         // No-op guard: if nothing actually changes, don't mutate. This keeps re-selecting a band's
         // current filter type (or nudging a value that's already at its clamp) from forking a
         // built-in preset to "(Custom)" or pushing a redundant undo step.

@@ -38,10 +38,10 @@ case "$dmg" in
     *)  dmg_path="$proj/$dmg" ;;
 esac
 
-if ! output=$(bash "$proj/verify-dmg.sh" "$dmg_path" 2>&1); then
+if ! output=$(bash "$proj/scripts/verify-dmg.sh" "$dmg_path" 2>&1); then
     echo "Blocked: $dmg failed pre-release verification (macOS would report it as \"damaged\")." >&2
     echo "$output" >&2
-    echo "Rebuild with 'bash create-dmg.sh' (which now verifies) before releasing." >&2
+    echo "Rebuild with 'bash scripts/create-dmg.sh' (which now verifies) before releasing." >&2
     exit 2
 fi
 

@@ -61,7 +61,7 @@ let package = Package(
         // iQualize process is not the one Continuity sees as the audio
         // observer. With the tap-owning process separated from the rendering
         // process, the main app's AVAudioEngine output is preemptible by
-        // Continuity (just like Spotify). See CONTINUITY.md.
+        // Continuity (just like Spotify). See docs/CONTINUITY.md.
         .executableTarget(
             name: "iQualizeCapture",
             dependencies: ["IQRingAtomics"],
