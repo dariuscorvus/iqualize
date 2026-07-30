@@ -120,7 +120,8 @@ func deinterleaveChannel(
 @MainActor
 final class AudioEngine {
     /// AVAudioUnitEQ's own native band capacity — an AudioEngine implementation
-    /// detail, not a user-facing limit. See the comment at its allocation in start().
+    /// detail, not a user-facing limit. See the comment at its allocation in start(),
+    /// and EQ_BAND_CAPACITY.md for why this can't just be raised.
     private static let avEQNativeBandCount = 31
 
     private(set) var isRunning = false
