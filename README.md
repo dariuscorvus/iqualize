@@ -45,6 +45,8 @@ xattr -dr com.apple.quarantine /Applications/iQualize.app
 
 Then open it normally. If the `.dmg` itself won't mount, clear the flag on the download first: `xattr -c ~/Downloads/iQualize-*.dmg`.
 
+Not comfortable with Terminal? On macOS Sequoia and Tahoe there's a GUI path: try opening iQualize once (you'll get the "damaged"/blocked dialog), then go to **System Settings → Privacy & Security → Security** and click **Open Anyway** next to the message about iQualize, confirming with your admin password. Older macOS versions expose the same option under **System Preferences → Security & Privacy → General** instead.
+
 ### Build from source
 
 ```bash

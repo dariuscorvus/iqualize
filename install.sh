@@ -121,6 +121,11 @@ if ! cmp -s "$STAMPED_PLIST" "$APP/Contents/Info.plist"; then
 fi
 cp -f "$STAMPED_PLIST" "$APP/Contents/Info.plist"
 rm -f "$STAMPED_PLIST"
+# mktemp creates STAMPED_PLIST 0600, and cp inherits that mode when the
+# destination doesn't already exist (first install on a fresh machine/CI
+# runner) — this shipped in the v0.51.0 DMG and broke the system audio
+# recording permission prompt for root-run installers (issue #142).
+chmod 644 "$APP/Contents/Info.plist"
 
 if [ "$NEEDS_RESIGN" = "1" ]; then
     # Record the pre-sign product hashes first so the sidecar is covered by

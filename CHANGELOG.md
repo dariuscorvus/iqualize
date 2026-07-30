@@ -2,7 +2,7 @@
 
 All notable changes to iQualize will be documented in this file.
 
-## [0.51.2] - 2026-07-27
+## [0.51.5] - 2026-07-30
 
 ### Fixed
 - The capture ring buffer had no drift handling (#133): the helper fills it on the tap aggregate's clock, the app drains it on the output device's clock, and when those clocks differ (USB or Bluetooth output) the fill level walks until the ring slips a sub-millisecond chunk. The reader now holds the ring at a fixed fill level with a micro-resampler (fill-level P-controller, Catmull-Rom interpolation, correction clamped to ±500 ppm ≈ 0.87 cent — inaudible; bit-exact passthrough at zero drift). Verified against ±100 ppm synthetic drift: fill converges, zero slips, a coherent 4 s tone measurement reads within 0.1 dB
@@ -15,6 +15,24 @@ All notable changes to iQualize will be documented in this file.
 
 ### Added
 - `iqualize status` reports capture-ring drift telemetry: `Capture: fill 2048 frames, drift +0.0 ppm, underruns 0, resyncs 0`. Counters reset on every capture (re)start (device switch, sleep/wake)
+
+## [0.51.4] - 2026-07-29
+
+### Fixed
+- The EQ window didn't fully restyle when its theme (Settings → Theme) disagreed with the system-wide appearance: text and accents switched immediately, but the window background and axis labels stayed on the old appearance, sometimes leaving light text on a light background or vice versa. `DreamRootView` looked up the window to restyle via `NSApp.windows.first(where: title contains "iQualize" or empty)`, which could silently match the Help window or a status-item window instead of the EQ window itself — it now uses a direct reference set by `DreamHostingView` when the window is created. Applying that override also moved from an `.onChange`/`.onAppear` side effect into the view's `body`, since the old timing applied the appearance one render after SwiftUI had already resolved that render's system colors against the previous one. Reported by Gary (@nordicdata, #144)
+
+### Added
+- README now documents the GUI path (System Settings → Privacy & Security → Security → Open Anyway) for allowing iQualize's unsigned build, for anyone not comfortable running the `xattr` command. Suggested by Gary (@nordicdata, #144)
+
+## [0.51.3] - 2026-07-29
+
+### Fixed
+- `install.sh` could ship `Info.plist` mode `0600` inside the DMG: the temp file used for build-commit stamping is created by `mktemp` (`0600`), and `cp` onto a not-yet-existing destination inherits the source mode — the case on a fresh CI runner building a release. Root-run install scripts that copy the app straight out of the DMG got an unreadable plist, which silenced the system audio recording permission prompt and left iQualize running with no audio output. `install.sh` now `chmod`s the installed plist to `644` after copying it in. Reported by @json20 (#142)
+
+## [0.51.2] - 2026-07-27
+
+### Fixed
+- Launching an app while the EQ ran splices ~100 ms of silence into playback — the momentary lag when Discord starts. The new-process watcher added for #87 restarted the tap on *any* new Core Audio process object, and a restart is a full teardown of the capture helper, tap, aggregate, ring buffer and audio graph. The capture helper now refreshes the live tap in place instead, by re-setting its description on the 1 s timer it already runs for call exclusions, and the restart path is gone. New processes that never play audio no longer cost anything either — 5 of 7 did not over a 30 s sample (#140)
 
 ## [0.51.1] - 2026-07-27
 
