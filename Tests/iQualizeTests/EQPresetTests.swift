@@ -47,13 +47,12 @@ final class EQPresetDataTests: XCTestCase {
 
     func testBuiltInPresetBandCountsWithinLimits() {
         // The classic 10-band presets keep 10 bands; the newer ones vary
-        // (Luzifer's Void 16, 0xDEADBEEF 20) but must fit the engine's cap.
+        // (Luzifer's Void 16, 0xDEADBEEF 20) — there's no upper cap to fit.
         XCTAssertEqual(EQPresetData.flat.bands.count, 10)
         XCTAssertEqual(EQPresetData.bassBoost.bands.count, 10)
         XCTAssertEqual(EQPresetData.vocalClarity.bands.count, 10)
         for preset in EQPresetData.builtInPresets {
             XCTAssertGreaterThanOrEqual(preset.bands.count, EQPresetData.minBandCount)
-            XCTAssertLessThanOrEqual(preset.bands.count, EQPresetData.maxBandCount)
         }
     }
 

@@ -58,7 +58,7 @@ open /Applications/iQualize.app
 
 ### Parametric EQ
 
-- Up to 31 bands with editable frequency (20 Hz – 20 kHz), gain, and bandwidth
+- No arbitrary limit on the number of EQ bands — the practical limit depends on your Mac's available processing resources. Editable frequency (20 Hz – 20 kHz), gain, and bandwidth per band
 - Q / Octave display toggle — switch between Q factor and octave bandwidth globally (Q is the default, octaves for musicians who think in bandwidth)
 - 7 filter types per band: Bell (parametric), Low Shelf, High Shelf, Low Pass, High Pass, Band Pass, and Notch
 - Biquad frequency response curve using Audio EQ Cookbook formulas, rendered as a translucent backdrop behind EQ sliders
@@ -76,7 +76,7 @@ open /Applications/iQualize.app
 - Add bands with + buttons on either side of the EQ — new band copies the leftmost or rightmost band
 - Right-click context menu: Add Suggested Band finds the largest frequency gap and inserts a new band at the geometric midpoint
 - Delete, or reorder via the right-click context menu (Move Left/Right)
-- Minimum 1 band, maximum 31
+- Minimum 1 band, no maximum
 
 ### Presets
 

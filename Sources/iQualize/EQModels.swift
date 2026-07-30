@@ -142,7 +142,6 @@ struct EQPresetData: Codable, Equatable, Sendable, Identifiable {
 extension EQPresetData {
     static let defaultFrequencies: [Float] = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
-    static let maxBandCount = 31
     static let minBandCount = 1
 }
 

@@ -114,9 +114,6 @@ enum PresetImporter {
         }
 
         guard !bands.isEmpty else { throw PresetImportError.noBandsFound }
-        if bands.count > EQPresetData.maxBandCount {
-            bands = Array(bands.prefix(EQPresetData.maxBandCount))
-        }
 
         return ParsedPreset(name: nil, bands: bands, rightBands: nil, inputGainDB: preamp, outputGainDB: nil)
     }
@@ -142,7 +139,8 @@ enum PresetImporter {
     // MARK: AutoEQ GraphicEQ.txt
 
     /// Standard 31-band ISO 1/3-octave center frequencies (20 Hz - 20 kHz).
-    /// Conveniently exactly `EQPresetData.maxBandCount`.
+    /// This is the resampling grid GraphicEQ imports are always converted onto,
+    /// independent of how many bands the app itself can process.
     private static let iso31BandFrequencies: [Float] = [
         20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800,
         1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000
@@ -184,17 +182,13 @@ enum PresetImporter {
     private static func parseOPRA(_ opra: OPRAEqInfo) throws -> ParsedPreset {
         guard opra.type == "parametric_eq" else { throw PresetImportError.unrecognizedFormat }
 
-        var bands = opra.parameters.bands.compactMap { band -> EQBand? in
+        let bands = opra.parameters.bands.compactMap { band -> EQBand? in
             guard let filterType = opraFilterType(band.type) else { return nil }
             let bandwidth = band.q.map { EQBand.qToOctaves($0) } ?? 1.0
             return EQBand(frequency: band.frequency, gain: band.gain_db ?? 0, bandwidth: bandwidth, filterType: filterType)
         }
 
         guard !bands.isEmpty else { throw PresetImportError.noBandsFound }
-        // Schema states bands are "sorted by priority" and software with fewer bands should truncate.
-        if bands.count > EQPresetData.maxBandCount {
-            bands = Array(bands.prefix(EQPresetData.maxBandCount))
-        }
 
         return ParsedPreset(name: nil, bands: bands, rightBands: nil, inputGainDB: opra.parameters.gain_db, outputGainDB: nil)
     }
