@@ -5,10 +5,10 @@ struct Capture: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "capture", abstract: "Get or set whether iQualize is capturing system audio.")
 
     enum Action: String, ExpressibleByArgument, CaseIterable {
-        case on, off, toggle
+        case on, off, toggle, tldr
     }
 
-    @Argument(help: "on, off, or toggle. Omit to just print the current state.")
+    @Argument(help: "on, off, toggle, or tldr. Omit to just print the current state.")
     var action: Action?
 
     func run() {
@@ -22,6 +22,9 @@ struct Capture: ParsableCommand {
             response = requireOK(sendOrExit(CLIRequest(command: CLICommand.setCapture, boolArg: false)))
         case .toggle:
             response = requireOK(sendOrExit(CLIRequest(command: CLICommand.toggleCapture)))
+        case .tldr:
+            printTldr(matching: "capture")
+            return
         }
         print("Capture: \(response.status?.isRunning == true ? "on" : "off")")
     }

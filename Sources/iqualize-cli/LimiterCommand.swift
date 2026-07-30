@@ -5,10 +5,10 @@ struct Limiter: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "limiter", abstract: "Get or set the peak limiter.")
 
     enum Action: String, ExpressibleByArgument, CaseIterable {
-        case on, off, toggle
+        case on, off, toggle, tldr
     }
 
-    @Argument(help: "on, off, or toggle. Omit to just print the current state.")
+    @Argument(help: "on, off, toggle, or tldr. Omit to just print the current state.")
     var action: Action?
 
     func run() {
@@ -22,6 +22,9 @@ struct Limiter: ParsableCommand {
             response = requireOK(sendOrExit(CLIRequest(command: CLICommand.setPeakLimiter, boolArg: false)))
         case .toggle:
             response = requireOK(sendOrExit(CLIRequest(command: CLICommand.togglePeakLimiter)))
+        case .tldr:
+            printTldr(matching: "limiter")
+            return
         }
         print("Peak limiter: \(response.status?.peakLimiter == true ? "on" : "off")")
     }

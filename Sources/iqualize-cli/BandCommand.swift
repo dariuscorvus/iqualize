@@ -26,12 +26,16 @@ func formatFrequency(_ hz: Float) -> String {
 struct Band: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "band", abstract: "Add, edit, delete, move, or mute an EQ band on the active preset.",
-        subcommands: [List.self, Add.self, Set.self, Delete.self, Move.self, Mute.self])
+        subcommands: [List.self, Add.self, Set.self, Delete.self, Move.self, Mute.self, Tldr.self])
 
     struct List: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "List bands on the active preset, sorted by frequency.")
 
+        @Flag(help: "Show quick usage examples for this command.")
+        var tldr = false
+
         func run() {
+            if tldr { printTldr(matching: "band list"); return }
             let response = requireOK(sendOrExit(CLIRequest(command: CLICommand.listBands)))
             guard let bands = response.bands else {
                 printErr("Error: missing bands in response")
@@ -56,8 +60,11 @@ struct Band: ParsableCommand {
         var bandwidth: Float?
         @Option(help: "Filter type. Defaults to parametric.")
         var filter: BandFilterType?
+        @Flag(help: "Show quick usage examples for this command.")
+        var tldr = false
 
         func run() {
+            if tldr { printTldr(matching: "band add"); return }
             let args = CLIBandArgs(frequency: frequency, gain: gain, bandwidth: bandwidth, filterType: filter?.rawValue)
             let response = requireOK(sendOrExit(CLIRequest(command: CLICommand.addBand, bandArgs: args)))
             if let band = response.bands?.first { print("Added \(formatBand(band))") }
@@ -79,12 +86,16 @@ struct Band: ParsableCommand {
         var bandwidth: Float?
         @Option(help: "New filter type.")
         var filter: BandFilterType?
+        @Flag(help: "Show quick usage examples for this command.")
+        var tldr = false
 
         func validate() throws {
+            if tldr { return }
             try validateBandAddressing(index: index, near: near)
         }
 
         func run() {
+            if tldr { printTldr(matching: "band set"); return }
             let args = CLIBandArgs(index: index, matchFrequency: near, frequency: frequency, gain: gain, bandwidth: bandwidth, filterType: filter?.rawValue)
             let response = requireOK(sendOrExit(CLIRequest(command: CLICommand.setBand, bandArgs: args)))
             if let band = response.bands?.first { print(formatBand(band)) }
@@ -98,12 +109,16 @@ struct Band: ParsableCommand {
         var index: Int?
         @Option(help: "Address the band nearest this frequency (Hz) instead of by index.")
         var near: Float?
+        @Flag(help: "Show quick usage examples for this command.")
+        var tldr = false
 
         func validate() throws {
+            if tldr { return }
             try validateBandAddressing(index: index, near: near)
         }
 
         func run() {
+            if tldr { printTldr(matching: "band delete"); return }
             let args = CLIBandArgs(index: index, matchFrequency: near)
             requireOK(sendOrExit(CLIRequest(command: CLICommand.deleteBand, bandArgs: args)))
             print("Deleted.")
@@ -122,13 +137,19 @@ struct Band: ParsableCommand {
         @Option(help: "Address the band nearest this frequency (Hz) instead of by index.")
         var near: Float?
         @Argument(help: "left or right.")
-        var direction: Direction
+        var direction: Direction?
+        @Flag(help: "Show quick usage examples for this command.")
+        var tldr = false
 
         func validate() throws {
+            if tldr { return }
+            guard direction != nil else { throw ValidationError("Missing expected argument '<direction>'") }
             try validateBandAddressing(index: index, near: near)
         }
 
         func run() {
+            if tldr { printTldr(matching: "band move"); return }
+            guard let direction else { return }
             let args = CLIBandArgs(index: index, matchFrequency: near, direction: direction.rawValue)
             let response = requireOK(sendOrExit(CLIRequest(command: CLICommand.moveBand, bandArgs: args)))
             if let band = response.bands?.first { print(formatBand(band)) }
@@ -139,17 +160,18 @@ struct Band: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Mute, unmute, or toggle a band. Muting keeps its gain intact — it's silenced non-destructively.")
 
         enum Action: String, ExpressibleByArgument, CaseIterable {
-            case on, off, toggle
+            case on, off, toggle, tldr
         }
 
         @Option(help: "1-based band index, sorted by frequency.")
         var index: Int?
         @Option(help: "Address the band nearest this frequency (Hz) instead of by index.")
         var near: Float?
-        @Argument(help: "on, off, or toggle.")
+        @Argument(help: "on, off, toggle, or tldr.")
         var action: Action
 
         func validate() throws {
+            if action == .tldr { return }
             try validateBandAddressing(index: index, near: near)
         }
 
@@ -163,8 +185,16 @@ struct Band: ParsableCommand {
                 response = requireOK(sendOrExit(CLIRequest(command: CLICommand.setBandMute, boolArg: false, bandArgs: args)))
             case .toggle:
                 response = requireOK(sendOrExit(CLIRequest(command: CLICommand.toggleBandMute, bandArgs: args)))
+            case .tldr:
+                printTldr(matching: "band mute")
+                return
             }
             if let band = response.bands?.first { print(formatBand(band)) }
         }
+    }
+
+    struct Tldr: ParsableCommand {
+        static let configuration = CommandConfiguration(commandName: "tldr", abstract: "Show quick usage examples for every band command.")
+        func run() { printTldr(matching: "band") }
     }
 }

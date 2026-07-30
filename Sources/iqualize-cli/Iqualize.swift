@@ -51,7 +51,11 @@ struct Iqualize: ParsableCommand {
 struct Version: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Show the app version and build commit.")
 
+    @Flag(help: "Show quick usage examples for this command.")
+    var tldr = false
+
     func run() {
+        if tldr { printTldr(matching: "version"); return }
         let response = requireOK(sendOrExit(CLIRequest(command: CLICommand.status)))
         guard let status = response.status else {
             printErr("Error: missing status in response")
@@ -64,7 +68,11 @@ struct Version: ParsableCommand {
 struct Status: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Show app version, capture/bypass/limiter state, active preset, gain, balance, spectrum overlays, and output device.")
 
+    @Flag(help: "Show quick usage examples for this command.")
+    var tldr = false
+
     func run() {
+        if tldr { printTldr(matching: "status"); return }
         let response = requireOK(sendOrExit(CLIRequest(command: CLICommand.status)))
         guard let status = response.status else {
             printErr("Error: missing status in response")
@@ -85,6 +93,11 @@ struct Presets: ParsableCommand {
         commandName: "presets", abstract: "List all presets.",
         subcommands: [List.self, Save.self, Reset.self, Delete.self, New.self, Rename.self, Duplicate.self,
                       Favorite.self, Pin.self, Unpin.self, Import.self, Export.self,
-                      Hidden.self, Restore.self, Opra.self],
+                      Hidden.self, Restore.self, Opra.self, Tldr.self],
         defaultSubcommand: List.self)
+
+    struct Tldr: ParsableCommand {
+        static let configuration = CommandConfiguration(commandName: "tldr", abstract: "Show quick usage examples for every presets command.")
+        func run() { printTldr(matching: "presets") }
+    }
 }

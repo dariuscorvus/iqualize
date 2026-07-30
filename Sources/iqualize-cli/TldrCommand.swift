@@ -149,20 +149,37 @@ struct Tldr: ParsableCommand {
     ]
 
     func run() {
-        let useColor = isatty(fileno(stdout)) != 0
-        func bold(_ s: String) -> String { useColor ? "\u{1B}[1m\(s)\u{1B}[0m" : s }
-        func cyan(_ s: String) -> String { useColor ? "\u{1B}[36m\(s)\u{1B}[0m" : s }
-        func dim(_ s: String) -> String { useColor ? "\u{1B}[2m\(s)\u{1B}[0m" : s }
+        printTldr()
+    }
+}
 
-        for (index, entry) in Self.entries.enumerated() {
-            print(bold("iqualize \(entry.name)"))
-            print("  \(entry.description)")
-            print()
-            for example in entry.examples {
-                print(dim("  - \(example.label):"))
-                print("      \(cyan(example.command))")
-            }
-            if index < Self.entries.count - 1 { print() }
+/// Prints tldr entries matching `prefix` — either an exact name match or a name that starts
+/// with "`prefix` " (a child command), so e.g. "presets" matches both the "presets" entry and
+/// every "presets ..." child. `nil` prints everything (the top-level `iqualize tldr`).
+func printTldr(matching prefix: String? = nil) {
+    let useColor = isatty(fileno(stdout)) != 0
+    func bold(_ s: String) -> String { useColor ? "\u{1B}[1m\(s)\u{1B}[0m" : s }
+    func cyan(_ s: String) -> String { useColor ? "\u{1B}[36m\(s)\u{1B}[0m" : s }
+    func dim(_ s: String) -> String { useColor ? "\u{1B}[2m\(s)\u{1B}[0m" : s }
+
+    let entries: [Tldr.Entry]
+    if let prefix {
+        entries = Tldr.entries.filter { $0.name == prefix || $0.name.hasPrefix("\(prefix) ") }
+    } else {
+        entries = Tldr.entries
+    }
+    guard !entries.isEmpty else {
+        printErr("No tldr entry found.")
+        return
+    }
+    for (index, entry) in entries.enumerated() {
+        print(bold("iqualize \(entry.name)"))
+        print("  \(entry.description)")
+        print()
+        for example in entry.examples {
+            print(dim("  - \(example.label):"))
+            print("      \(cyan(example.command))")
         }
+        if index < entries.count - 1 { print() }
     }
 }

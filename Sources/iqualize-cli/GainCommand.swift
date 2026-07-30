@@ -5,7 +5,7 @@ struct Gain: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "gain",
         abstract: "Get or set input/output gain.",
-        subcommands: [Input.self, Output.self, Link.self]
+        subcommands: [Input.self, Output.self, Link.self, Tldr.self]
     )
 
     struct Input: ParsableCommand {
@@ -14,7 +14,11 @@ struct Gain: ParsableCommand {
         @Argument(help: "Gain in dB. Omit to just print the current value.")
         var db: Float?
 
+        @Flag(help: "Show quick usage examples for this command.")
+        var tldr = false
+
         func run() {
+            if tldr { printTldr(matching: "gain input"); return }
             let request = db.map { CLIRequest(command: CLICommand.setInputGain, floatArg: $0) }
                 ?? CLIRequest(command: CLICommand.status)
             let response = requireOK(sendOrExit(request))
@@ -30,7 +34,11 @@ struct Gain: ParsableCommand {
         @Argument(help: "Gain in dB. Omit to just print the current value.")
         var db: Float?
 
+        @Flag(help: "Show quick usage examples for this command.")
+        var tldr = false
+
         func run() {
+            if tldr { printTldr(matching: "gain output"); return }
             let request = db.map { CLIRequest(command: CLICommand.setOutputGain, floatArg: $0) }
                 ?? CLIRequest(command: CLICommand.status)
             let response = requireOK(sendOrExit(request))
@@ -44,10 +52,10 @@ struct Gain: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Get or set whether In/Out gain is shared across all presets.")
 
         enum Action: String, ExpressibleByArgument, CaseIterable {
-            case on, off, toggle
+            case on, off, toggle, tldr
         }
 
-        @Argument(help: "on, off, or toggle. Omit to just print the current state.")
+        @Argument(help: "on, off, toggle, or tldr. Omit to just print the current state.")
         var action: Action?
 
         func run() {
@@ -61,8 +69,16 @@ struct Gain: ParsableCommand {
                 response = requireOK(sendOrExit(CLIRequest(command: CLICommand.setGainIsGlobal, boolArg: false)))
             case .toggle:
                 response = requireOK(sendOrExit(CLIRequest(command: CLICommand.toggleGainIsGlobal)))
+            case .tldr:
+                printTldr(matching: "gain link")
+                return
             }
             print("Gain link: \(response.status?.gainIsGlobal == true ? "on" : "off")")
         }
+    }
+
+    struct Tldr: ParsableCommand {
+        static let configuration = CommandConfiguration(commandName: "tldr", abstract: "Show quick usage examples for every gain command.")
+        func run() { printTldr(matching: "gain") }
     }
 }

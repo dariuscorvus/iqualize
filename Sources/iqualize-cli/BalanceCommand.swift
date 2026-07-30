@@ -9,7 +9,11 @@ struct Balance: ParsableCommand {
     @Argument(help: "Balance from -1 to 1. Omit to just print the current value.")
     var value: Float?
 
+    @Flag(help: "Show quick usage examples for this command.")
+    var tldr = false
+
     func run() {
+        if tldr { printTldr(matching: "balance"); return }
         let request = value.map { CLIRequest(command: CLICommand.setBalance, floatArg: $0) }
             ?? CLIRequest(command: CLICommand.status)
         let response = requireOK(sendOrExit(request))
