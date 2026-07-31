@@ -316,10 +316,10 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         return newValue
     }
 
-    /// Sets input gain in dB, forking the active preset if it's built-in and gain isn't
+    /// Sets input gain in dB, saving it into the active preset in place when gain isn't
     /// shared globally — mirrors `DreamViewModel.applyInputGain`
     /// (Sources/iQualize/DreamUI/DreamViewModel.swift), plus persisting `selectedPresetID`
-    /// so a fork survives a relaunch instead of reverting to the built-in original.
+    /// so the edit survives a relaunch.
     func setInputGain(_ db: Float) {
         if audioEngine.gainIsGlobal {
             audioEngine.inputGainDB = db
@@ -327,10 +327,10 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
             s.inputGainDB = db
             s.save()
         } else {
-            var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+            var preset = audioEngine.activePreset
             preset.inputGainDB = db
             audioEngine.activePreset = preset
-            presetStore.saveCustomPreset(preset)
+            persistPreset(preset)
             var s = iQualizeState.load()
             s.selectedPresetID = preset.id
             s.save()
@@ -338,7 +338,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         eqWindowController?.syncUIToPreset()
     }
 
-    /// Sets output gain in dB — same fork-if-built-in rule as `setInputGain`.
+    /// Sets output gain in dB — same in-place save rule as `setInputGain`.
     func setOutputGain(_ db: Float) {
         if audioEngine.gainIsGlobal {
             audioEngine.outputGainDB = db
@@ -346,10 +346,10 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
             s.outputGainDB = db
             s.save()
         } else {
-            var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+            var preset = audioEngine.activePreset
             preset.outputGainDB = db
             audioEngine.activePreset = preset
-            presetStore.saveCustomPreset(preset)
+            persistPreset(preset)
             var s = iQualizeState.load()
             s.selectedPresetID = preset.id
             s.save()
@@ -383,8 +383,9 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         return newValue
     }
 
-    /// Mirrors SettingsWindowController.toggleLinkGainGlobally(_:) verbatim — forks the
-    /// active preset on the global -> per-preset transition so it survives a relaunch.
+    /// Mirrors SettingsWindowController.toggleLinkGainGlobally(_:) verbatim — saves the
+    /// active preset's gain in place on the global -> per-preset transition so it survives
+    /// a relaunch.
     func setGainIsGlobal(_ global: Bool) {
         var s = iQualizeState.load()
         if global {
@@ -395,10 +396,10 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
             audioEngine.gainIsGlobal = true
         } else {
             audioEngine.gainIsGlobal = false
-            var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+            var preset = audioEngine.activePreset
             preset.inputGainDB = audioEngine.inputGainDB
             preset.outputGainDB = audioEngine.outputGainDB
-            presetStore.saveCustomPreset(preset)
+            persistPreset(preset)
             audioEngine.activePreset = preset
             s.linkGainGlobally = false
             s.save()
@@ -491,10 +492,21 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
                                bandwidth: band.bandwidth, filterType: band.filterType.rawValue, muted: band.muted)
     }
 
-    /// Same fork -> mutate -> push -> persist -> sync shape as setInputGain/setPeakLimiter.
+    /// Persists `preset` to whichever store it belongs in — the built-in override table if
+    /// it's a built-in, `customPresets` otherwise. Nothing forks: a built-in stays a built-in,
+    /// edited and saved in place.
+    private func persistPreset(_ preset: EQPresetData) {
+        if preset.isBuiltIn {
+            presetStore.saveBuiltInOverride(preset)
+        } else {
+            presetStore.saveCustomPreset(preset)
+        }
+    }
+
+    /// Same mutate -> push -> persist -> sync shape as setInputGain/setPeakLimiter.
     private func persistBandMutation(_ preset: EQPresetData) {
         audioEngine.activePreset = preset
-        presetStore.saveCustomPreset(preset)
+        persistPreset(preset)
         var s = iQualizeState.load()
         s.selectedPresetID = preset.id
         s.save()
@@ -507,7 +519,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
     }
 
     func addBand(frequency: Float?, gain: Float?, bandwidth: Float?, filterType: String?) throws -> CLIBandSummary {
-        var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        var preset = audioEngine.activePreset
         let type: FilterType
         if let filterType {
             guard let parsed = FilterType(rawValue: filterType) else {
@@ -526,7 +538,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
     }
 
     func deleteBand(index: Int?, matchFrequency: Float?) throws {
-        var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        var preset = audioEngine.activePreset
         let id = try resolveBandID(index: index, matchFrequency: matchFrequency, in: preset)
         guard preset.bands.count > EQPresetData.minBandCount else {
             throw CLIHandlerError(message: "preset must keep at least \(EQPresetData.minBandCount) band")
@@ -536,7 +548,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
     }
 
     func setBand(index: Int?, matchFrequency: Float?, frequency: Float?, gain: Float?, bandwidth: Float?, filterType: String?) throws -> CLIBandSummary {
-        var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        var preset = audioEngine.activePreset
         let id = try resolveBandID(index: index, matchFrequency: matchFrequency, in: preset)
         guard let i = preset.bands.firstIndex(where: { $0.id == id }) else {
             throw CLIHandlerError(message: "band not found")
@@ -557,7 +569,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
     /// Mirrors DreamViewModel.moveBandHorizontally(id:dir:) exactly: swaps FREQUENCY VALUES
     /// with the adjacent band in sorted order — not an array reorder.
     func moveBand(index: Int?, matchFrequency: Float?, direction: String) throws -> CLIBandSummary {
-        var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        var preset = audioEngine.activePreset
         let id = try resolveBandID(index: index, matchFrequency: matchFrequency, in: preset)
         let sorted = preset.bands.sorted { $0.frequency < $1.frequency }
         guard let idx = sorted.firstIndex(where: { $0.id == id }) else {
@@ -591,7 +603,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
     /// stored gain here would lose it permanently; AudioEngine.applyBands' effectiveGain(_:)
     /// respects `.muted` at the DSP layer instead.
     func setBandMute(index: Int?, matchFrequency: Float?, muted: Bool) throws -> CLIBandSummary {
-        var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        var preset = audioEngine.activePreset
         let id = try resolveBandID(index: index, matchFrequency: matchFrequency, in: preset)
         guard let i = preset.bands.firstIndex(where: { $0.id == id }) else {
             throw CLIHandlerError(message: "band not found")
@@ -603,7 +615,7 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
 
     @discardableResult
     func toggleBandMute(index: Int?, matchFrequency: Float?) throws -> CLIBandSummary {
-        let preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        let preset = audioEngine.activePreset
         let id = try resolveBandID(index: index, matchFrequency: matchFrequency, in: preset)
         guard let current = preset.bands.first(where: { $0.id == id })?.muted else {
             throw CLIHandlerError(message: "band not found")
@@ -621,16 +633,14 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         return presetStore.allPresets.first { $0.name.caseInsensitiveCompare(idOrName) == .orderedSame }
     }
 
-    /// Forks (if needed) and persists the active preset. A no-op in the common case (already
-    /// a custom preset with no pending changes since every CLI mutation already persists
-    /// immediately) — the one thing it actually does is "adopt" a freshly-selected built-in
-    /// into a real custom preset, mirroring the GUI's Save -> Save-As-for-built-ins rule
-    /// minus the name prompt (per the CLI's auto-fork convention).
+    /// Persists the active preset as-is. A no-op in the common case (every CLI mutation
+    /// already persists immediately) — matters only for a freshly-selected, never-touched
+    /// built-in, which this saves back to itself as a (no-op) override.
     @discardableResult
     func saveActivePreset() -> CLIPresetSummary {
-        let preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+        let preset = audioEngine.activePreset
         persistBandMutation(preset)
-        return CLIPresetSummary(id: preset.id, name: preset.name, isBuiltIn: false,
+        return CLIPresetSummary(id: preset.id, name: preset.name, isBuiltIn: preset.isBuiltIn,
                                  isFavorite: presetStore.isFavorite(preset.id), isActive: true)
     }
 
@@ -679,9 +689,9 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         return CLIPresetSummary(id: preset.id, name: preset.name, isBuiltIn: false, isFavorite: false, isActive: true)
     }
 
-    /// Renaming a built-in forks it first and renames the fork — the true built-in is never
-    /// mutated in place, consistent with every other CLI mutation. Renaming "Flat" itself is
-    /// deliberately not blocked (unlike delete): it only ever creates a harmless fork.
+    /// Renaming a built-in now renames it in place — an override, name included — consistent
+    /// with every other CLI mutation. Renaming "Flat" itself is still not blocked (unlike
+    /// delete): it only ever changes the display name, not Flat's protected id.
     func renamePreset(idOrName: String, newName: String) throws -> CLIPresetSummary {
         guard let source = resolvePreset(idOrName: idOrName) else {
             throw CLIHandlerError(message: "no preset named '\(idOrName)'")
@@ -691,13 +701,13 @@ final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLIComm
         guard !presetStore.allPresets.contains(where: { $0.id != source.id && $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) else {
             throw CLIHandlerError(message: "a preset named '\(trimmed)' already exists")
         }
-        var renamed = presetStore.forkIfBuiltIn(source)
+        var renamed = source
         renamed.name = trimmed
-        presetStore.saveCustomPreset(renamed)
+        persistPreset(renamed)
         if audioEngine.activePreset.id == source.id {
             persistBandMutation(renamed)
         }
-        return CLIPresetSummary(id: renamed.id, name: renamed.name, isBuiltIn: false,
+        return CLIPresetSummary(id: renamed.id, name: renamed.name, isBuiltIn: renamed.isBuiltIn,
                                  isFavorite: presetStore.isFavorite(renamed.id), isActive: audioEngine.activePreset.id == renamed.id)
     }
 

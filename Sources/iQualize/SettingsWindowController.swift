@@ -334,12 +334,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             audioEngine.gainIsGlobal = true
         } else {
             // Global -> Per-preset: seed the active preset with the current global gain,
-            // forking it out of a built-in first if needed.
+            // saved in place whether it's a built-in or a custom preset.
             audioEngine.gainIsGlobal = false
-            var preset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
+            var preset = audioEngine.activePreset
             preset.inputGainDB = audioEngine.inputGainDB
             preset.outputGainDB = audioEngine.outputGainDB
-            presetStore.saveCustomPreset(preset)
+            if preset.isBuiltIn {
+                presetStore.saveBuiltInOverride(preset)
+            } else {
+                presetStore.saveCustomPreset(preset)
+            }
             audioEngine.activePreset = preset
             state.linkGainGlobally = false
             state.save()

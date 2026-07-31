@@ -27,7 +27,7 @@ extension Presets {
     }
 
     struct Save: ParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Save the active preset, forking it first if it's built-in.")
+        static let configuration = CommandConfiguration(abstract: "Save the active preset in place, built-in or not.")
 
         @Flag(help: "Show quick usage examples for this command.")
         var tldr = false
@@ -88,7 +88,7 @@ extension Presets {
     }
 
     struct Rename: ParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Rename a preset. Forks it first if it's built-in.")
+        static let configuration = CommandConfiguration(abstract: "Rename a preset, built-in or not.")
 
         @Argument(help: "Preset name (case-insensitive) or UUID to rename.")
         var name: String?

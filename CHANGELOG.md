@@ -2,6 +2,15 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.54.0] - 2026-07-31
+
+### Changed
+- Built-in presets are now edited and saved in place instead of forking into a "(Custom)" copy on first edit (#101). `PresetStore` gained a `builtInOverrides` table keyed by the built-in's own id — `allPresets`/`hiddenBuiltInPresets` resolve through it, so identity, `isBuiltIn`, and picker position never change, only content. `forkIfBuiltIn` is gone from both the GUI (`DreamViewModel`) and CLI (`MenuBarController`, `SettingsWindowController`) mutation paths, and Save on a built-in no longer redirects to Save As. The Preset Browser's iQualize tab gained an "Edited" section (alongside the existing hidden/"Restore" one) with its own "Reset to Original" action, mirrored inline in the EQ window's Save menu when the active preset has a saved override. Existing forks from the old model are left alone as regular custom presets — no migration, since a fork can't be reliably distinguished from an independently-created custom preset with a coincidental name.
+
+### Fixed
+- `DreamViewModel.savePreset()` never refreshed the window title, so the "●" unsaved-changes dot lingered after a successful save. Pre-existing for custom presets, but only became visible once built-ins started saving through the same path instead of always redirecting to Save As.
+- The Preset Browser's "Reset to Original" called `PresetStore` directly, bypassing the EQ window's view model — if the reset preset was also the one currently loaded there, the window kept showing (and could re-save) the stale override instead of syncing to the reverted original.
+
 ## [0.53.0] - 2026-07-30
 
 ### Changed

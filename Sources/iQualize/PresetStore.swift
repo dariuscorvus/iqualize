@@ -12,9 +12,15 @@ final class PresetStore {
     private(set) var hiddenBuiltInPresetIDs: [UUID] = []
     /// Preset pinned per output device, keyed by the device's stable CoreAudio UID.
     private(set) var pinnedPresetIDByDeviceUID: [String: UUID] = [:]
+    /// Built-in presets the user has edited and saved in place, keyed by the built-in's own
+    /// (stable) id. A built-in with no entry here is still exactly what shipped. Independent
+    /// of `hiddenBuiltInPresetIDs` — a built-in can be hidden, overridden, both, or neither.
+    private(set) var builtInOverrides: [UUID: EQPresetData] = [:]
 
     var allPresets: [EQPresetData] {
-        EQPresetData.builtInPresets.filter { !hiddenBuiltInPresetIDs.contains($0.id) } + customPresets
+        EQPresetData.builtInPresets
+            .filter { !hiddenBuiltInPresetIDs.contains($0.id) }
+            .map(resolved) + customPresets
     }
 
     /// Favorited presets, in favorite order. Skips IDs that no longer resolve to a preset.
@@ -23,15 +29,28 @@ final class PresetStore {
     }
 
     /// Built-in presets currently hidden from the picker — shown in the Preset Browser's
-    /// iQualize tab so they can be brought back.
+    /// iQualize tab so they can be brought back. Reflects any saved edits, not the pristine
+    /// original, so "Restore" brings back what the user last saved.
     var hiddenBuiltInPresets: [EQPresetData] {
-        EQPresetData.builtInPresets.filter { hiddenBuiltInPresetIDs.contains($0.id) }
+        EQPresetData.builtInPresets.filter { hiddenBuiltInPresetIDs.contains($0.id) }.map(resolved)
+    }
+
+    /// Built-in presets the user has edited and saved in place, in catalog order — shown in
+    /// the Preset Browser's iQualize tab so they can be reset back to their original values.
+    var overriddenBuiltInPresets: [EQPresetData] {
+        EQPresetData.builtInPresets.compactMap { builtInOverrides[$0.id] }
+    }
+
+    /// Resolves a built-in to its saved override, or itself if untouched.
+    private func resolved(_ builtIn: EQPresetData) -> EQPresetData {
+        builtInOverrides[builtIn.id] ?? builtIn
     }
 
     private static let key = "com.iqualize.customPresets"
     private static let favoritesKey = "com.iqualize.favoritePresetIDs"
     private static let hiddenBuiltInsKey = "com.iqualize.hiddenBuiltInPresetIDs"
     private static let devicePinsKey = "com.iqualize.pinnedPresetsByDevice"
+    private static let builtInOverridesKey = "com.iqualize.builtInOverrides"
 
     /// Injectable so tests can use an isolated suite instead of polluting the real app's
     /// persisted state (or leaking test data between runs).
@@ -121,24 +140,28 @@ final class PresetStore {
         persistHiddenBuiltIns()
     }
 
-    /// Returns a "(Custom)" fork of `preset` (deduped name against `allPresets`) if it's
-    /// built-in; returns `preset` unchanged otherwise. Pure — does not persist and does not
-    /// touch AudioEngine; callers decide whether/when to call `saveCustomPreset`.
-    func forkIfBuiltIn(_ preset: EQPresetData) -> EQPresetData {
-        guard preset.isBuiltIn else { return preset }
-        return EQPresetData(
-            id: UUID(),
-            name: dedupedName(base: "\(preset.name) (Custom)"),
-            bands: preset.bands,
-            rightBands: preset.rightBands,
-            isBuiltIn: false,
-            inputGainDB: preset.inputGainDB,
-            outputGainDB: preset.outputGainDB
-        )
+    /// Whether `id` (a built-in's id) currently has a saved override.
+    func hasOverride(_ id: UUID) -> Bool {
+        builtInOverrides[id] != nil
+    }
+
+    /// Saves `preset` as the in-place override for the built-in it belongs to. No-ops for a
+    /// non-built-in — use `saveCustomPreset` for those.
+    func saveBuiltInOverride(_ preset: EQPresetData) {
+        guard preset.isBuiltIn else { return }
+        builtInOverrides[preset.id] = preset
+        persistBuiltInOverrides()
+    }
+
+    /// Discards the saved override for the built-in `id`, reverting it back to whatever
+    /// `EQPresetData.builtInPresets` ships. A no-op if there's no override.
+    func resetBuiltInToOriginal(id: UUID) {
+        guard builtInOverrides.removeValue(forKey: id) != nil else { return }
+        persistBuiltInOverrides()
     }
 
     /// Appends " 2", " 3", ... to `base` until it doesn't collide (exact match) with any
-    /// current preset name. Shared by `forkIfBuiltIn` and the CLI's `duplicate` command.
+    /// current preset name. Used by the CLI's `duplicate` command.
     func dedupedName(base: String) -> String {
         let existing = Set(allPresets.map { $0.name })
         guard existing.contains(base) else { return base }
@@ -164,6 +187,10 @@ final class PresetStore {
            let pins = try? JSONDecoder().decode([String: UUID].self, from: data) {
             pinnedPresetIDByDeviceUID = pins
         }
+        if let data = defaults.data(forKey: Self.builtInOverridesKey),
+           let overrides = try? JSONDecoder().decode([UUID: EQPresetData].self, from: data) {
+            builtInOverrides = overrides
+        }
     }
 
     private func persist() {
@@ -187,6 +214,12 @@ final class PresetStore {
     private func persistDevicePins() {
         if let data = try? JSONEncoder().encode(pinnedPresetIDByDeviceUID) {
             defaults.set(data, forKey: Self.devicePinsKey)
+        }
+    }
+
+    private func persistBuiltInOverrides() {
+        if let data = try? JSONEncoder().encode(builtInOverrides) {
+            defaults.set(data, forKey: Self.builtInOverridesKey)
         }
     }
 }

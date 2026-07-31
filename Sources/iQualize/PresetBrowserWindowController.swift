@@ -8,7 +8,11 @@ import SwiftUI
 @available(macOS 14.2, *)
 @MainActor
 final class PresetBrowserWindowController: NSWindowController, NSWindowDelegate {
-    init(presetStore: PresetStore, onImportOPRA: @escaping (OPRAProductEntry, OPRACurveEntry) -> Void) {
+    init(
+        presetStore: PresetStore,
+        onImportOPRA: @escaping (OPRAProductEntry, OPRACurveEntry) -> Void,
+        onResetBuiltIn: @escaping (UUID) -> Void
+    ) {
         let window = ShortcutAwareWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
@@ -22,7 +26,7 @@ final class PresetBrowserWindowController: NSWindowController, NSWindowDelegate 
         super.init(window: window)
         window.delegate = self
 
-        let host = NSHostingView(rootView: PresetBrowserView(presetStore: presetStore, onImportOPRA: onImportOPRA))
+        let host = NSHostingView(rootView: PresetBrowserView(presetStore: presetStore, onImportOPRA: onImportOPRA, onResetBuiltIn: onResetBuiltIn))
         host.translatesAutoresizingMaskIntoConstraints = false
 
         let container = NSView()

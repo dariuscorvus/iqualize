@@ -55,12 +55,13 @@ struct DreamToolbar: View {
         Button("New") { vm.newPreset() }
 
         Menu {
-            Button("Save") {
-                if vm.isBuiltIn { vm.presentSaveAsDialog() } else { vm.savePreset() }
-            }
-            .keyboardShortcut("s", modifiers: .command)
+            Button("Save") { vm.savePreset() }
+                .keyboardShortcut("s", modifiers: .command)
             Button("Save As…") { vm.presentSaveAsDialog() }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+            if vm.isBuiltIn && vm.presetStore.hasOverride(vm.activePresetID) {
+                Button("Reset to Original") { vm.resetActiveBuiltInToOriginal() }
+            }
             Divider()
             Button("Import Preset…") { vm.importPresets() }
             Button("Preset Browser…") { vm.showPresetBrowser() }
@@ -68,7 +69,7 @@ struct DreamToolbar: View {
         } label: {
             Text("Save")
         } primaryAction: {
-            if vm.isBuiltIn { vm.presentSaveAsDialog() } else { vm.savePreset() }
+            vm.savePreset()
         }
         .menuStyle(.button)
         .controlSize(.regular)
