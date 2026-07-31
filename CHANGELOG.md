@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.55.0] - 2026-07-31
+
+### Changed
+- The EQ window's toolbar (Undo/Redo, preset picker, New/Save/Reset/Delete, snap/pin/settings) is now a native `NSToolbar` unified with the title bar, instead of a custom SwiftUI row rendered below it. Buttons are icon-only with hover tooltips; the toolbar supports the standard macOS "Customize Toolbar…" palette (rearrange/hide/reset via `NSToolbar.allowsUserCustomization`). Save keeps its dropdown via `NSMenuToolbarItem` (Save As…/Reset to Original/Import/Preset Browser/Export). The window title is now a static "iQualize" instead of showing the preset name/modified state, since that's now shown in the preset picker toolbar item. `DreamToolbar.swift` and `PresetPickerButton.swift` are removed; their logic moved to the new `DreamToolbarController`.
+
 ## [0.54.0] - 2026-07-31
 
 ### Changed

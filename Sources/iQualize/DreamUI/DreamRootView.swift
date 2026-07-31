@@ -19,8 +19,6 @@ struct DreamRootView: View {
         let theme = DreamTheme(scheme: resolvedScheme)
 
         VStack(spacing: 0) {
-            DreamToolbar(vm: vm)
-                .padding(.top, 6)
             VStack(spacing: 0) {
                 EQCanvasView(vm: vm)
                 EQReadoutGrid(vm: vm)
