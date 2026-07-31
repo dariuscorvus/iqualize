@@ -28,7 +28,7 @@ struct DreamRootView: View {
             DreamFooter(vm: vm)
                 .padding(.bottom, 14)
         }
-        .background(SidebarMaterialBackground())
+        .background(ContentMaterialBackground())
         .environment(\.dreamTheme, theme)
         .preferredColorScheme(vm.theme.colorScheme)
         .background(
