@@ -39,7 +39,7 @@ struct DreamFooter: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(theme.bgToolbar)
+        .background(SidebarMaterialBackground())
     }
 
     /// Thin vertical separator between footer groups, matching the toolbar's

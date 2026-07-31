@@ -37,7 +37,7 @@ struct EQCanvasView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .padding(.top, 8)
             }
-            .background(theme.bgCanvas)
+            .background(SidebarMaterialBackground())
             .clipped()
         }
         .frame(maxWidth: .infinity, minHeight: 380, idealHeight: 380, maxHeight: .infinity)

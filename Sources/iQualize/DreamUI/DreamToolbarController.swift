@@ -10,6 +10,8 @@ import SwiftUI
 final class DreamToolbarController: NSObject, NSToolbarDelegate {
     private let vm: DreamViewModel
 
+    private let toggleSidebarItem: NSToolbarItem
+    private let sidebarTrackingSeparatorItem: NSTrackingSeparatorToolbarItem
     private let undoItem: NSToolbarItem
     private let redoItem: NSToolbarItem
     private let presetPickerItem: NSToolbarItem
@@ -24,8 +26,26 @@ final class DreamToolbarController: NSObject, NSToolbarDelegate {
     private let presetPickerButton: NSButton
     private let snapButton: NSButton
 
-    init(vm: DreamViewModel) {
+    init(vm: DreamViewModel, splitView: NSSplitView) {
         self.vm = vm
+
+        toggleSidebarItem = NSToolbarItem(itemIdentifier: .dreamToggleSidebar)
+        toggleSidebarItem.label = "Sidebar"
+        toggleSidebarItem.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Toggle Sidebar")
+        toggleSidebarItem.toolTip = "Toggle Sidebar"
+        toggleSidebarItem.target = nil
+        toggleSidebarItem.action = #selector(NSSplitViewController.toggleSidebar(_:))
+
+        // Ties the toolbar layout to the sidebar/content divider: items placed before this one
+        // (just the toggle button) are constrained to the sidebar pane's current width, so the
+        // toggle button hugs the sidebar's right edge and moves with the divider — Safari's
+        // "sidebar button lives inside the sidebar" look — rather than sitting in the fixed
+        // leading toolbar group.
+        sidebarTrackingSeparatorItem = NSTrackingSeparatorToolbarItem(
+            identifier: .dreamSidebarTrackingSeparator,
+            splitView: splitView,
+            dividerIndex: 0
+        )
 
         undoItem = NSToolbarItem(itemIdentifier: .dreamUndo)
         undoItem.label = "Undo"
@@ -231,6 +251,8 @@ final class DreamToolbarController: NSObject, NSToolbarDelegate {
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
         switch itemIdentifier {
+        case .dreamToggleSidebar: return toggleSidebarItem
+        case .dreamSidebarTrackingSeparator: return sidebarTrackingSeparatorItem
         case .dreamUndo: return undoItem
         case .dreamRedo: return redoItem
         case .dreamPresetPicker: return presetPickerItem
@@ -247,6 +269,8 @@ final class DreamToolbarController: NSObject, NSToolbarDelegate {
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [
+            .dreamToggleSidebar,
+            .dreamSidebarTrackingSeparator,
             .dreamUndo, .dreamRedo, .dreamPresetPicker, .dreamNew, .dreamSave, .dreamReset, .dreamDelete,
             .flexibleSpace,
             .dreamSnap, .dreamPin, .dreamSettings,
@@ -260,6 +284,8 @@ final class DreamToolbarController: NSObject, NSToolbarDelegate {
 
 @available(macOS 14.2, *)
 extension NSToolbarItem.Identifier {
+    static let dreamToggleSidebar = NSToolbarItem.Identifier("dreamToggleSidebar")
+    static let dreamSidebarTrackingSeparator = NSToolbarItem.Identifier("dreamSidebarTrackingSeparator")
     static let dreamUndo = NSToolbarItem.Identifier("dreamUndo")
     static let dreamRedo = NSToolbarItem.Identifier("dreamRedo")
     static let dreamPresetPicker = NSToolbarItem.Identifier("dreamPresetPicker")
