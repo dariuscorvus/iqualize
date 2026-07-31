@@ -22,6 +22,7 @@ final class EQWindowController: NSWindowController {
     private let audioEngine: AudioEngine
     private let presetStore: PresetStore
     private let viewModel: DreamViewModel
+    private let toolbarController: DreamToolbarController
 
     /// Callback to open the settings window.
     var onOpenSettings: (() -> Void)? {
@@ -37,7 +38,8 @@ final class EQWindowController: NSWindowController {
         self.presetStore = presetStore
         self.viewModel = DreamViewModel(audioEngine: audioEngine, presetStore: presetStore)
 
-        let window = DreamHostingView.makeWindow(viewModel: viewModel)
+        let (window, toolbarController) = DreamHostingView.makeWindow(viewModel: viewModel)
+        self.toolbarController = toolbarController
         super.init(window: window)
 
         // Ensure the view model picks up the latest output device name from the engine.
@@ -45,7 +47,7 @@ final class EQWindowController: NSWindowController {
         audioEngine.onStateChange = { [weak self] in
             previousCallback?()
             self?.viewModel.syncFromAudioEngine()
-            self?.refreshWindowTitle()
+            self?.toolbarController.refresh()
         }
 
         // Restore active preset. Falls back to Flat if the persisted ID no longer resolves
@@ -61,19 +63,14 @@ final class EQWindowController: NSWindowController {
         }
         viewModel.syncFromAudioEngine(initial: true)
 
-        viewModel.onTitleShouldUpdate = { [weak self] in self?.refreshWindowTitle() }
-        refreshWindowTitle()
+        viewModel.onTitleShouldUpdate = { [weak self] in self?.toolbarController.refresh() }
+        toolbarController.refresh()
 
         // Keyboard shortcuts (arrow keys, Esc, ⌘Z/⇧⌘Z, ⌘B, M, Tab, ⌫). Routed through the
         // window's keyDown so they fire even when SwiftUI's local-event monitor is somehow bypassed.
         window.onKeyDown = { [weak self] event in
             self?.viewModel.handleKey(event) ?? false
         }
-    }
-
-    private func refreshWindowTitle() {
-        let name = viewModel.presetName
-        window?.title = viewModel.isModified ? "iQualize — \(name) ●" : "iQualize — \(name)"
     }
 
     @available(*, unavailable)

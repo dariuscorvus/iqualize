@@ -3,8 +3,8 @@ import AppKit
 /// A preset row rendered as a custom NSMenuItem view so ⌥-click-to-favorite can keep
 /// the menu open — a plain title/action NSMenuItem always closes the menu on any click,
 /// with no way to distinguish "favorite" from "select" without closing either way.
-/// Shared by MenuBarController (status-item dropdown) and PresetPickerButton (in-app
-/// toolbar) so both surfaces render and behave identically from one source of truth.
+/// Shared by MenuBarController (status-item dropdown) and DreamToolbarController (native
+/// window toolbar) so both surfaces render and behave identically from one source of truth.
 final class PresetRowView: NSView {
     var presetID: UUID!
     var onSelect: (() -> Void)?

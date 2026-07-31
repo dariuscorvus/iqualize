@@ -8,19 +8,16 @@ struct DreamRootView: View {
 
     var body: some View {
         let resolvedScheme: ColorScheme = vm.theme.colorScheme ?? systemScheme
-        // Must run before `theme` below: DreamTheme.bgWindow/bgToolbar/bgCanvas resolve
-        // via Color(nsColor:), which reads the *window's* actual NSAppearance at draw
-        // time, not this view's `scheme`/environment. Applying the override inside a
-        // .onChange/.onAppear side effect fires one render late — SwiftUI had already
-        // resolved this render's NSColors against the *old* appearance by the time the
-        // side effect landed, so those surfaces stayed on the previous appearance while
-        // the scheme-driven (hardcoded RGB) colors below switched immediately (#144).
+        // Must run synchronously here, not in a .onChange/.onAppear side effect: the window's
+        // real NSAppearance drives native materials (traffic lights, the sidebar's vibrant
+        // NSVisualEffectView) that don't go through this view's `scheme`/environment at all.
+        // A side effect fires one render late — SwiftUI had already resolved this render's
+        // scheme-driven (hardcoded RGB) colors against the *new* scheme by the time the side
+        // effect landed, so native surfaces lagged a frame behind the SwiftUI-drawn ones (#144).
         let _ = applyWindowAppearance()
         let theme = DreamTheme(scheme: resolvedScheme)
 
         VStack(spacing: 0) {
-            DreamToolbar(vm: vm)
-                .padding(.top, 6)
             VStack(spacing: 0) {
                 EQCanvasView(vm: vm)
                 EQReadoutGrid(vm: vm)
@@ -31,7 +28,7 @@ struct DreamRootView: View {
             DreamFooter(vm: vm)
                 .padding(.bottom, 14)
         }
-        .background(theme.bgWindow)
+        .background(ContentMaterialBackground())
         .environment(\.dreamTheme, theme)
         .preferredColorScheme(vm.theme.colorScheme)
         .background(

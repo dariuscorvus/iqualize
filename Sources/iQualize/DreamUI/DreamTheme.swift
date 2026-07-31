@@ -9,10 +9,6 @@ struct DreamTheme {
 
     // Surfaces
     var bgPage: Color           { scheme == .dark ? Color(rgb: 0x0a0c10) : Color(rgb: 0xf1f3f7) }
-    var bgWindow: Color         { Color(nsColor: .windowBackgroundColor) }
-    var bgTitlebar: Color       { Color(nsColor: .windowBackgroundColor) }
-    var bgToolbar: Color        { Color(nsColor: .windowBackgroundColor) }
-    var bgCanvas: Color         { Color(nsColor: .controlBackgroundColor) }
     var bgReadout: Color        { scheme == .dark ? Color.white.opacity(0.025) : Color.black.opacity(0.025) }
     var bgReadoutHover: Color   { scheme == .dark ? Color.white.opacity(0.05)  : Color.black.opacity(0.05) }
     var bgReadoutSel: Color     { Color(rgba: 0x3b82f6, a: scheme == .dark ? 0.15 : 0.12) }

@@ -296,35 +296,6 @@ private final class AnimatedTrackClickSlider: NSSlider {
     }
 }
 
-// MARK: - toolbar group separator
-
-struct DreamToolbarGroup<Content: View>: View {
-    let content: Content
-    var trailingDivider: Bool = true
-
-    @Environment(\.dreamTheme) private var theme
-
-    init(trailingDivider: Bool = true, @ViewBuilder content: () -> Content) {
-        self.trailingDivider = trailingDivider
-        self.content = content()
-    }
-
-    var body: some View {
-        HStack(spacing: 4) {
-            content
-        }
-        .padding(.trailing, trailingDivider ? 8 : 0)
-        .overlay(alignment: .trailing) {
-            if trailingDivider {
-                theme.line
-                    .frame(width: 1)
-                    .padding(.vertical, 4)
-            }
-        }
-        .padding(.trailing, trailingDivider ? 4 : 0)
-    }
-}
-
 // MARK: - Magnet icon
 
 /// Tabler's `magnet` glyph (SF Symbols has no `magnet` on macOS), rendered straight from its SVG
@@ -342,7 +313,7 @@ struct MagnetIcon: View {
             .frame(width: size, height: size)
     }
 
-    private static let image: NSImage = {
+    static let image: NSImage = {
         let svg = #"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 13V5a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v8a2 2 0 0 0 6 0V5a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v8a8 8 0 0 1-16 0m0-5h5m6 0h4"/></svg>"#
         let img = NSImage(data: Data(svg.utf8)) ?? NSImage()
         img.isTemplate = true

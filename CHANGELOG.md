@@ -2,6 +2,18 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.56.0] - 2026-07-31
+
+### Added
+- A native collapsible sidebar in the EQ window, toggled from the toolbar's new leftmost button, listing presets in Favorites/Built-in/Custom sections with a star button to toggle favorites. Selecting a row loads it through the same `DreamViewModel.loadPreset(id:)` path as the existing toolbar preset picker, so the unsaved-changes confirmation still applies. This is additive — the toolbar's preset-picker popup menu is unchanged and both remain side by side. Implemented via a new `NSSplitViewController` (`DreamSplitViewController`), replacing the window's plain `NSView` content view; collapsed by default, state and width persist across launches.
+- The window now uses `.fullSizeContentView` with a transparent title bar, so the sidebar's background extends up behind the traffic lights and the toolbar floats over it, Safari-style, instead of stopping at an opaque toolbar strip. The window title text is hidden so the sidebar-toggle button sits flush against the traffic lights (Xcode/Notes/Mail convention) rather than being pushed right by reserved title space. An `NSTrackingSeparatorToolbarItem` ties the toggle button to the sidebar/content divider, so it hugs the sidebar's right edge and moves with it when resized (Safari's "button lives inside the sidebar" behavior) instead of sitting in the fixed leading toolbar group.
+- The EQ canvas/readout/footer backgrounds now use a native `NSVisualEffectView` (`ContentMaterialBackground`, `.contentBackground` material) instead of a flat `windowBackgroundColor` fill that matched the sidebar's tone in light mode but visibly diverged from it in dark mode — the same class of solid content-pane background Finder/Mail/Xcode use next to a vibrant sidebar (the sidebar itself keeps its native vibrant `.sidebar` material; content panes stay opaque, not translucent). It also correctly dims when the window loses focus, matching the native sidebar list instead of always rendering as if key. `DreamTheme.bgWindow`/`bgToolbar`/`bgCanvas`/`bgTitlebar` are removed as unused. The sidebar's favorite-star accent color changed from a hardcoded yellow to the system accent color (`NSColor.controlAccentColor`).
+
+## [0.55.0] - 2026-07-31
+
+### Changed
+- The EQ window's toolbar (Undo/Redo, preset picker, New/Save/Reset/Delete, snap/pin/settings) is now a native `NSToolbar` unified with the title bar, instead of a custom SwiftUI row rendered below it. Buttons are icon-only with hover tooltips; the toolbar supports the standard macOS "Customize Toolbar…" palette (rearrange/hide/reset via `NSToolbar.allowsUserCustomization`). Save keeps its dropdown via `NSMenuToolbarItem` (Save As…/Reset to Original/Import/Preset Browser/Export). The window title is now a static "iQualize" instead of showing the preset name/modified state, since that's now shown in the preset picker toolbar item. `DreamToolbar.swift` and `PresetPickerButton.swift` are removed; their logic moved to the new `DreamToolbarController`.
+
 ## [0.54.0] - 2026-07-31
 
 ### Changed
