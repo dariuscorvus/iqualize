@@ -89,8 +89,8 @@ final class DreamViewModel {
     }
 
     /// Unpins if the active preset is already the one pinned here, otherwise pins it.
-    /// No-ops while there are unsaved changes — pinning an unsaved fork would point at an
-    /// id that isn't in `PresetStore`, silently dangling the pin.
+    /// No-ops while there are unsaved changes — the pin stores only the id, so pinning now
+    /// would later resolve to whatever's on disk, not the edit currently on screen.
     func toggleDevicePin() {
         guard let uid = audioEngine.outputDeviceUID else { return }
         if isCurrentDevicePinnedToActivePreset {
@@ -237,9 +237,8 @@ final class DreamViewModel {
     }
 
     /// The dirty flag tracks whether the EQ *content* (band curves) differs from the saved
-    /// baseline — not the preset's identity (id / name / built-in flag). Comparing identity is
-    /// wrong across a built-in→"(Custom)" fork: undoing the fork restores the same curve under a
-    /// different identity and would otherwise leave a phantom dirty dot.
+    /// baseline, not the preset's identity — a built-in and a custom preset are edited and
+    /// saved the same way, in place.
     private func contentMatchesSaved(_ preset: EQPresetData) -> Bool {
         guard let saved = savedSnapshot else { return false }
         return preset.bands == saved.bands
@@ -253,7 +252,6 @@ final class DreamViewModel {
     /// Snapshot before mutation, mutate, then register undo. `actionName` is shown in Edit > Undo.
     private func mutate(_ actionName: String, _ transform: () -> Void) {
         let oldPreset = audioEngine.activePreset
-        forkIfBuiltIn()
         transform()
         pushBandsToEngine()
         registerUndo(actionName: actionName, oldPreset: oldPreset)
@@ -262,7 +260,6 @@ final class DreamViewModel {
     /// Same as `mutate` but does not register undo — for in-progress drag operations
     /// where undo registers on drag end via `commitDrag`.
     private func liveMutate(_ transform: () -> Void) {
-        forkIfBuiltIn()
         transform()
         pushBandsToEngine()
     }
@@ -387,16 +384,6 @@ final class DreamViewModel {
         }
     }
 
-    private func forkIfBuiltIn() {
-        guard audioEngine.activePreset.isBuiltIn else { return }
-        let newPreset = presetStore.forkIfBuiltIn(audioEngine.activePreset)
-        audioEngine.activePreset = newPreset
-        savedSnapshot = newPreset
-        presetName = newPreset.name
-        activePresetID = newPreset.id
-        isBuiltIn = false
-    }
-
     private func registerUndo(actionName: String, oldPreset: EQPresetData) {
         guard let undoManager else { return }
         let currentPreset = audioEngine.activePreset
@@ -437,8 +424,8 @@ final class DreamViewModel {
         let newGain = gain.map      { max(-gainClamp, min(gainClamp, $0)) }
         let newBW   = bandwidth.map { $0.clamped(to: EQBand.bandwidthRange) }
         // No-op guard: if nothing actually changes, don't mutate. This keeps re-selecting a band's
-        // current filter type (or nudging a value that's already at its clamp) from forking a
-        // built-in preset to "(Custom)" or pushing a redundant undo step.
+        // current filter type (or nudging a value that's already at its clamp) from dirtying a
+        // built-in preset or pushing a redundant undo step.
         let changes =
             (newFreq.map     { $0 != cur.frequency }  ?? false) ||
             (newGain.map     { $0 != cur.gain }       ?? false) ||
@@ -606,20 +593,35 @@ final class DreamViewModel {
     }
 
     func savePreset() {
-        if isBuiltIn {
-            // Save-As required for built-in
-            saveAsPreset(name: nil)
-            return
-        }
         var preset = audioEngine.activePreset
         preset.bands = bands
         preset.rightBands = rightBands
-        presetStore.saveCustomPreset(preset)
+        if isBuiltIn {
+            presetStore.saveBuiltInOverride(preset)
+        } else {
+            presetStore.saveCustomPreset(preset)
+        }
         savedSnapshot = preset
         isModified = false
+        onTitleShouldUpdate?()
         var s = iQualizeState.load()
         s.selectedPresetID = preset.id
         s.save()
+    }
+
+    /// Reverts the active built-in preset to its shipped original — undoes not just the
+    /// current session's edits but any previously-saved override. No-op unless the active
+    /// preset is a built-in with a saved override.
+    func resetActiveBuiltInToOriginal() {
+        guard isBuiltIn, presetStore.hasOverride(activePresetID),
+              let original = EQPresetData.builtInPresets.first(where: { $0.id == activePresetID }) else { return }
+        let old = audioEngine.activePreset
+        audioEngine.activePreset = original
+        presetStore.resetBuiltInToOriginal(id: activePresetID)
+        savedSnapshot = original
+        isModified = false
+        syncFromAudioEngine()
+        registerUndo(actionName: "Reset to Original", oldPreset: old)
     }
 
     func saveAsPreset(name: String?) {
@@ -699,9 +701,7 @@ final class DreamViewModel {
     // MARK: - Native dialogs
 
     /// If there are unsaved changes, asks Save / Cancel / Don't Save before running `then`.
-    /// Proceeds straight to `then` when there's nothing to lose. "Save" reuses the same
-    /// built-in-redirects-to-Save-As rule as the toolbar's Save button; if that dialog gets
-    /// cancelled, the whole action is treated as cancelled too.
+    /// Proceeds straight to `then` when there's nothing to lose.
     func confirmDiscardIfNeeded(then: @escaping () -> Void) {
         guard isModified else { then(); return }
         let alert = NSAlert()
@@ -712,12 +712,7 @@ final class DreamViewModel {
         alert.addButton(withTitle: "Don't Save")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
-            if isBuiltIn {
-                presentSaveAsDialog()
-                if isModified { return } // the Save As name prompt was itself cancelled
-            } else {
-                savePreset()
-            }
+            savePreset()
             then()
         case .alertThirdButtonReturn:
             then()
@@ -878,12 +873,26 @@ final class DreamViewModel {
     /// Opens (or refocuses) the Preset Browser window (OPRA tab + iQualize tab).
     func showPresetBrowser() {
         if presetBrowserWindowController == nil {
-            presetBrowserWindowController = PresetBrowserWindowController(presetStore: presetStore) { [weak self] product, curve in
-                self?.importOPRACurve(product: product, curve: curve)
-            }
+            presetBrowserWindowController = PresetBrowserWindowController(
+                presetStore: presetStore,
+                onImportOPRA: { [weak self] product, curve in self?.importOPRACurve(product: product, curve: curve) },
+                onResetBuiltIn: { [weak self] id in self?.resetBuiltIn(id: id) }
+            )
         }
         presetBrowserWindowController?.showWindow(nil)
         presetBrowserWindowController?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Resets a built-in's saved override from outside the EQ window (the Preset Browser).
+    /// Routes through `resetActiveBuiltInToOriginal()` when `id` is the preset currently loaded
+    /// here, so the live bands/curve/dirty-state stay in sync with the store — otherwise the
+    /// window would keep showing the stale override and could re-save it on the next Save.
+    private func resetBuiltIn(id: UUID) {
+        if id == activePresetID {
+            resetActiveBuiltInToOriginal()
+        } else {
+            presetStore.resetBuiltInToOriginal(id: id)
+        }
     }
 
     private func importOPRACurve(product: OPRAProductEntry, curve: OPRACurveEntry) {
@@ -954,12 +963,11 @@ final class DreamViewModel {
         }
     }
 
-    /// Per-preset gain edit: forks a built-in in-memory only (matches `mutate()`'s band-edit
-    /// behavior) — no `PresetStore.saveCustomPreset` call, so the fork stays out of the picker
-    /// and out of persisted state until an explicit Save.
+    /// Per-preset gain edit: mutates in-memory only (matches `mutate()`'s band-edit behavior) —
+    /// no store-persist call here, so the edit stays out of the picker and out of persisted
+    /// state until an explicit Save.
     private func mutateGain(_ actionName: String, _ apply: (inout EQPresetData) -> Void) {
         let oldPreset = audioEngine.activePreset
-        forkIfBuiltIn()
         var preset = audioEngine.activePreset
         apply(&preset)
         audioEngine.activePreset = preset

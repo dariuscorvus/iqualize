@@ -42,25 +42,77 @@ final class PresetStoreTests: XCTestCase {
         XCTAssertEqual(store.dedupedName(base: "Flat (Custom)"), "Flat (Custom) 3")
     }
 
-    // MARK: - forkIfBuiltIn
+    // MARK: - built-in overrides
 
-    func testForkIfBuiltInUsesDedupedName() {
+    func testSaveBuiltInOverrideAppliesInPlace() {
         let store = makeStore()
-        let fork1 = store.forkIfBuiltIn(EQPresetData.flat)
-        XCTAssertEqual(fork1.name, "Flat (Custom)")
-        XCTAssertFalse(fork1.isBuiltIn)
-        store.saveCustomPreset(fork1)
-        let fork2 = store.forkIfBuiltIn(EQPresetData.flat)
-        XCTAssertEqual(fork2.name, "Flat (Custom) 2")
-        XCTAssertNotEqual(fork1.id, fork2.id)
+        var edited = EQPresetData.flat
+        edited.name = "Flat (edited)"
+        edited.bands[0].gain = 6
+
+        store.saveBuiltInOverride(edited)
+
+        XCTAssertTrue(store.hasOverride(EQPresetData.flat.id))
+        let resolved = store.preset(for: EQPresetData.flat.id)
+        XCTAssertEqual(resolved?.id, EQPresetData.flat.id)
+        XCTAssertTrue(resolved?.isBuiltIn ?? false)
+        XCTAssertEqual(resolved?.name, "Flat (edited)")
+        XCTAssertEqual(resolved?.bands.first?.gain, 6)
+        // Identity and count in allPresets are unchanged — no fork appended.
+        XCTAssertEqual(store.allPresets.filter { $0.id == EQPresetData.flat.id }.count, 1)
     }
 
-    func testForkIfBuiltInReturnsUnchangedForCustomPreset() {
+    func testSaveBuiltInOverrideNoOpsForCustomPreset() {
         let store = makeStore()
         let custom = makePreset(name: "My Custom")
-        let forked = store.forkIfBuiltIn(custom)
-        XCTAssertEqual(forked.id, custom.id)
-        XCTAssertEqual(forked.name, custom.name)
+        store.saveBuiltInOverride(custom)
+        XCTAssertFalse(store.hasOverride(custom.id))
+    }
+
+    func testResetBuiltInToOriginalRevertsContent() {
+        let store = makeStore()
+        var edited = EQPresetData.bassBoost
+        edited.bands[0].gain = 0
+        store.saveBuiltInOverride(edited)
+        XCTAssertTrue(store.hasOverride(EQPresetData.bassBoost.id))
+
+        store.resetBuiltInToOriginal(id: EQPresetData.bassBoost.id)
+
+        XCTAssertFalse(store.hasOverride(EQPresetData.bassBoost.id))
+        XCTAssertEqual(store.preset(for: EQPresetData.bassBoost.id), EQPresetData.bassBoost)
+    }
+
+    func testOverriddenBuiltInPresetsListsOnlyOverriddenOnes() {
+        let store = makeStore()
+        XCTAssertTrue(store.overriddenBuiltInPresets.isEmpty)
+
+        var edited = EQPresetData.loudness
+        edited.name = "Loudness (edited)"
+        store.saveBuiltInOverride(edited)
+
+        XCTAssertEqual(store.overriddenBuiltInPresets.map(\.id), [EQPresetData.loudness.id])
+        XCTAssertEqual(store.overriddenBuiltInPresets.first?.name, "Loudness (edited)")
+    }
+
+    func testHiddenBuiltInPresetReflectsOverride() {
+        let store = makeStore()
+        var edited = EQPresetData.techno
+        edited.name = "Techno (edited)"
+        store.saveBuiltInOverride(edited)
+        store.hideBuiltInPreset(id: EQPresetData.techno.id)
+
+        XCTAssertEqual(store.hiddenBuiltInPresets.first?.name, "Techno (edited)")
+    }
+
+    func testBuiltInOverridePersistsAcrossReload() {
+        let store = makeStore()
+        var edited = EQPresetData.flat
+        edited.name = "Flat (edited)"
+        store.saveBuiltInOverride(edited)
+
+        let reloaded = makeStore()
+        XCTAssertTrue(reloaded.hasOverride(EQPresetData.flat.id))
+        XCTAssertEqual(reloaded.preset(for: EQPresetData.flat.id)?.name, "Flat (edited)")
     }
 
     // MARK: - saveCustomPreset upsert

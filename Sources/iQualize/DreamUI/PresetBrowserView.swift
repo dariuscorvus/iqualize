@@ -3,8 +3,8 @@ import SwiftUI
 /// Top-level Preset Browser: a `NavigationSplitView` whose sidebar stacks a search field on
 /// top, the scrolling catalog list in the middle, and the OPRA/iQualize catalog picker pinned
 /// at the bottom. The picker switches between OPRA's community database and iQualize's own
-/// built-in presets the user has hidden from their picker. The detail pane shows the selected
-/// OPRA product's community EQ curves.
+/// built-in presets the user has hidden from their picker or edited and saved in place. The
+/// detail pane shows the selected OPRA product's community EQ curves.
 ///
 /// The search field is a plain `VStack` sibling above the `List`, not `.searchable`. A
 /// `.searchable(placement: .sidebar)` field renders as a transparent overlay inside the
@@ -14,6 +14,12 @@ import SwiftUI
 struct PresetBrowserView: View {
     let presetStore: PresetStore
     let onImportOPRA: (OPRAProductEntry, OPRACurveEntry) -> Void
+    /// Routes through the EQ window's view model rather than calling
+    /// `presetStore.resetBuiltInToOriginal` directly — if the preset being reset is also the
+    /// one currently loaded in the EQ window, the view model needs to sync its in-memory bands
+    /// back to the original too, or the window keeps showing (and could re-save) the stale
+    /// override.
+    let onResetBuiltIn: (UUID) -> Void
 
     private enum Catalog: String, CaseIterable {
         case opra = "OPRA"
@@ -41,6 +47,12 @@ struct PresetBrowserView: View {
         let hidden = presetStore.hiddenBuiltInPresets
         guard !searchText.isEmpty else { return hidden }
         return hidden.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    private var filteredOverriddenPresets: [EQPresetData] {
+        let overridden = presetStore.overriddenBuiltInPresets
+        guard !searchText.isEmpty else { return overridden }
+        return overridden.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
     var body: some View {
@@ -141,20 +153,38 @@ struct PresetBrowserView: View {
     @ViewBuilder
     private var iqualizeSidebar: some View {
         let hidden = filteredHiddenPresets
-        if hidden.isEmpty {
+        let overridden = filteredOverriddenPresets
+        if hidden.isEmpty && overridden.isEmpty {
             Text(searchText.isEmpty
-                 ? "All built-in presets are already in your list"
+                 ? "All built-in presets are in your list, unedited"
                  : "No matching presets")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(hidden) { preset in
-                HStack {
-                    Text(preset.name)
-                    Spacer()
-                    Button("Restore") { presetStore.restoreBuiltInPreset(id: preset.id) }
+            List {
+                if !overridden.isEmpty {
+                    Section("Edited") {
+                        ForEach(overridden) { preset in
+                            HStack {
+                                Text(preset.name)
+                                Spacer()
+                                Button("Reset to Original") { onResetBuiltIn(preset.id) }
+                            }
+                        }
+                    }
+                }
+                if !hidden.isEmpty {
+                    Section("Hidden") {
+                        ForEach(hidden) { preset in
+                            HStack {
+                                Text(preset.name)
+                                Spacer()
+                                Button("Restore") { presetStore.restoreBuiltInPreset(id: preset.id) }
+                            }
+                        }
+                    }
                 }
             }
             .listStyle(.sidebar)
@@ -223,7 +253,7 @@ struct PresetBrowserView: View {
                 placeholder("Select a headphone to see available EQ profiles")
             }
         case .iqualize:
-            placeholder("Restore a built-in preset to add it back to your picker")
+            placeholder("Restore a hidden built-in, or reset an edited one back to its original values")
         }
     }
 

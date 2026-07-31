@@ -94,7 +94,7 @@ struct Tldr: ParsableCommand {
             ("Mute the first band", "iqualize band mute --index 1 on"),
             ("Toggle the band nearest 500 Hz", "iqualize band mute --near 500 toggle"),
         ]),
-        Entry(name: "presets save", description: "Save the active preset, forking it first if it's built-in.", examples: [
+        Entry(name: "presets save", description: "Save the active preset in place, built-in or not.", examples: [
             ("Save the active preset", "iqualize presets save"),
         ]),
         Entry(name: "presets reset", description: "Switch the active preset back to Flat.", examples: [
@@ -108,7 +108,7 @@ struct Tldr: ParsableCommand {
             ("Create a preset with an auto-generated name", "iqualize presets new"),
             ("Create a preset with a specific name", "iqualize presets new \"My EQ\""),
         ]),
-        Entry(name: "presets rename", description: "Rename a preset. Forks it first if it's built-in.", examples: [
+        Entry(name: "presets rename", description: "Rename a preset, built-in or not.", examples: [
             ("Rename a preset", "iqualize presets rename \"Custom EQ 1\" \"Studio Monitors\""),
         ]),
         Entry(name: "presets duplicate", description: "Duplicate a preset under a new name. Doesn't switch the active preset.", examples: [
