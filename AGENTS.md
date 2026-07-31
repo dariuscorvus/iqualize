@@ -2,6 +2,15 @@
 
 macOS menu bar audio equalizer using system audio capture + AVAudioEngine.
 
+## Commit Messages
+
+Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `<type>[optional scope]: <description>`.
+
+- **type**: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
+- Breaking change: append `!` after the type/scope (`feat!: ...`) or add a `BREAKING CHANGE:` footer
+- Description: imperative mood, lowercase, no trailing period
+- This isn't yet reflected in the existing history — apply it going forward, don't rewrite past commits
+
 ## Version Bumping
 
 Version lives in `Sources/iQualize/Info.plist` (`CFBundleShortVersionString` and `CFBundleVersion`).
@@ -24,10 +33,9 @@ Version lives in `Sources/iQualize/Info.plist` (`CFBundleShortVersionString` and
 Only do this when the user explicitly asks to cut/tag/publish a release — not automatically after merging a PR.
 
 1. Bump the version and update `CHANGELOG.md` (should already be done in the merge PR, per above — backfill on `main` first if it wasn't).
-2. Tag the merge commit on `main`: `git tag vX.Y.Z <commit>` (lightweight tag, matching every existing tag in this repo) then `git push origin vX.Y.Z`.
-3. Build the installer: `bash scripts/create-dmg.sh` — builds, signs, packages, and verifies `iQualize-X.Y.Z.dmg` in the repo root. It runs `scripts/verify-dmg.sh` at the end and aborts if the app inside has a broken/invalid signature (the state macOS reports as "damaged" — issue #115). A `PreToolUse` hook (`.claude/settings.json`) also blocks `gh release create` on a DMG that fails the same check. The app is ad-hoc signed, not notarized, so downloads still need `xattr -dr com.apple.quarantine`.
-4. Publish the GitHub Release with the DMG attached: `gh release create vX.Y.Z iQualize-X.Y.Z.dmg --title "vX.Y.Z — <short description>" --notes "..."`. Look at a recent release (`gh release view vX.Y.Z-1`) for the notes format — highlights list, a link to the CHANGELOG diff, and the Gatekeeper `xattr -dr com.apple.quarantine` install instructions.
-5. Publishing a Release (step 4) is a distinct public action from tagging (step 2) — confirm with the user separately before running `gh release create`, even if they already approved the tag.
+2. Tag the merge commit on `main`: `git tag vX.Y.Z <commit>` (lightweight tag, matching every existing tag in this repo) then `git push origin vX.Y.Z`. **This is the action that publishes the release** — pushing a `v*` tag starts the `Release` workflow (`.github/workflows/release.yml`), which runs the tests, builds and verifies the universal DMG, notarizes it if the `APPLE_*` secrets are configured, and creates the GitHub Release itself (title, generated + curated notes, DMG attached). Confirm with the user before pushing the tag, not after — there's no separate manual publish step to gate on.
+3. To dry-run the build without publishing anything, trigger the workflow manually instead of pushing a tag: `gh workflow run release.yml` — runs tests, builds and verifies the DMG, and uploads it as a workflow artifact; no release is created.
+4. Only if CI fails and a release genuinely needs to be built or published by hand: `bash scripts/create-dmg.sh` builds, signs, packages, and verifies `iQualize-X.Y.Z.dmg` in the repo root (it runs `scripts/verify-dmg.sh` and aborts if the app inside has a broken/invalid signature — the state macOS reports as "damaged", issue #115), then `gh release create vX.Y.Z iQualize-X.Y.Z.dmg --title "vX.Y.Z — <short description>" --notes "..."` (check a recent release's format with `gh release view vX.Y.Z-1` — highlights list, CHANGELOG diff link, Gatekeeper `xattr -dr com.apple.quarantine` instructions). A `PreToolUse` hook (`.claude/settings.json`) blocks a `gh release create`/`gh release upload` that attaches a DMG failing that same verification. Unsigned builds need `xattr -dr com.apple.quarantine` after download.
 
 ## Task Tracking
 
