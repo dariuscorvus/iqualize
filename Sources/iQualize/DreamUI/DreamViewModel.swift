@@ -838,8 +838,12 @@ final class DreamViewModel {
             forName: NSControl.textDidChangeNotification,
             object: nameField, queue: .main
         ) { _ in
-            let current = nameField.stringValue.trimmingCharacters(in: .whitespaces)
-            actionButton.title = customNames.contains(current) ? "Overwrite" : "Import"
+            // The notification is delivered on .main, but the closure is typed
+            // @Sendable, so the main-actor hop has to be stated explicitly.
+            MainActor.assumeIsolated {
+                let current = nameField.stringValue.trimmingCharacters(in: .whitespaces)
+                actionButton.title = customNames.contains(current) ? "Overwrite" : "Import"
+            }
         }
 
         let response = alert.runModal()

@@ -23,32 +23,38 @@ func getDefaultOutputDeviceID() throws -> AudioDeviceID {
     return deviceID
 }
 
-func getDeviceUID(_ deviceID: AudioDeviceID) throws -> String {
+// CoreAudio returns a +1 CFString for the UID/name selectors. Reading it into a
+// `var uid: CFString` and passing `&uid` forms a raw pointer to a variable that
+// holds an object reference — the compiler warns, and it leaks the retain.
+// Reading into an `Unmanaged` and consuming it with takeRetainedValue is the
+// correct ownership transfer.
+private func getCFStringProperty(
+    _ deviceID: AudioDeviceID,
+    _ selector: AudioObjectPropertySelector,
+    _ message: String
+) throws -> String {
     var address = AudioObjectPropertyAddress(
-        mSelector: kAudioDevicePropertyDeviceUID,
+        mSelector: selector,
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
-    var uid: CFString = "" as CFString
-    var size = UInt32(MemoryLayout<CFString>.size)
+    var value: Unmanaged<CFString>?
+    var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
     try caCheck(
-        AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &uid),
-        "Failed to get device UID"
+        AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value),
+        message
     )
-    return uid as String
+    guard let value else {
+        throw NSError(domain: "iQualize", code: -1,
+                      userInfo: [NSLocalizedDescriptionKey: "\(message): no value returned"])
+    }
+    return value.takeRetainedValue() as String
+}
+
+func getDeviceUID(_ deviceID: AudioDeviceID) throws -> String {
+    try getCFStringProperty(deviceID, kAudioDevicePropertyDeviceUID, "Failed to get device UID")
 }
 
 func getDeviceName(_ deviceID: AudioDeviceID) throws -> String {
-    var address = AudioObjectPropertyAddress(
-        mSelector: kAudioObjectPropertyName,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain
-    )
-    var name: CFString = "" as CFString
-    var size = UInt32(MemoryLayout<CFString>.size)
-    try caCheck(
-        AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &name),
-        "Failed to get device name"
-    )
-    return name as String
+    try getCFStringProperty(deviceID, kAudioObjectPropertyName, "Failed to get device name")
 }

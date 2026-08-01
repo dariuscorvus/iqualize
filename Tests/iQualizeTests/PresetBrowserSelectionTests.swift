@@ -2,6 +2,7 @@ import XCTest
 @testable import iQualize
 
 @available(macOS 14.2, *)
+@MainActor
 final class PresetBrowserSelectionTests: XCTestCase {
     private func product(_ id: String, vendor: String, name: String) -> OPRAProductEntry {
         OPRAProductEntry(
