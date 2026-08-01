@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.57.4] - 2026-08-01
+
+### Fixed
+- CLI commands with a response over 64 KiB failed with "Couldn't reach iQualize. Is it installed?" (#167). `iqualize presets opra search "audio"` returns ~127 KB and hit two separate limits: `UnixSocketIO.writeFrame` issued a single `write(2)` on a socket whose send buffer is 8 KiB and treated the short write as failure, and `readLine` capped at 64 KiB and returned the partial data with no way to tell truncation from EOF. The truncated frame then failed to decode, which the client reported as a connection failure — so it launched a second copy of the app and retried for 5 seconds before blaming the user's install. Writes now loop until the whole frame is out, retrying `EINTR`; reads are chunked with a bounded 32 MB cap and throw a distinct error for truncation; and the launch-and-retry path only runs for a genuine connection failure. Server-side write failures are logged instead of discarded.
+
 ## [0.57.3] - 2026-08-01
 
 ### Fixed

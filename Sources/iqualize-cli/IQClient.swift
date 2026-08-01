@@ -5,11 +5,21 @@ import IQControlProtocol
 enum IQClientError: Error, CustomStringConvertible {
     case appNotReachable
     case malformedResponse
+    /// The app answered but the frame didn't arrive whole. Distinct from `appNotReachable`
+    /// because the app is plainly running — telling the user to check their install would be
+    /// wrong, and relaunching it would be pointless.
+    case truncatedResponse(FrameReadError)
+    /// A whole frame arrived and failed to decode.
+    case decodeFailed(Error)
 
     var description: String {
         switch self {
         case .appNotReachable: return "Couldn't reach iQualize. Is it installed?"
         case .malformedResponse: return "Received a malformed response from iQualize."
+        case .truncatedResponse(let reason):
+            return "iQualize's response was cut short (\(reason))."
+        case .decodeFailed(let error):
+            return "Couldn't decode iQualize's response: \(error)"
         }
     }
 }
@@ -19,15 +29,34 @@ enum IQClientError: Error, CustomStringConvertible {
 /// few seconds before giving up.
 enum IQClient {
     static func send(_ request: CLIRequest) throws -> CLIResponse {
-        if let response = try? sendOnce(request) {
-            return response
+        try send(request, attempt: sendOnce, launch: launchApp, wait: { usleep(100_000) })
+    }
+
+    /// The retry policy, with its side effects injected so a test can observe them.
+    ///
+    /// Only a genuine connection failure justifies launching the app and retrying. A
+    /// truncated or undecodable response means the app answered — retrying it 50 times and
+    /// then blaming the user's install is what made #167 so hard to diagnose.
+    static func send(
+        _ request: CLIRequest,
+        attempt: (CLIRequest) throws -> CLIResponse,
+        launch: () -> Void,
+        wait: () -> Void,
+        retries: Int = 50 // 50 × 100ms — ~5s total before giving up
+    ) throws -> CLIResponse {
+        do {
+            return try attempt(request)
+        } catch let error as IQClientError {
+            guard case .appNotReachable = error else { throw error }
         }
 
-        launchApp()
-        for _ in 0..<50 {
-            usleep(100_000) // 100ms — ~5s total before giving up
-            if let response = try? sendOnce(request) {
-                return response
+        launch()
+        for _ in 0..<retries {
+            wait()
+            do {
+                return try attempt(request)
+            } catch let error as IQClientError {
+                guard case .appNotReachable = error else { throw error }
             }
         }
         throw IQClientError.appNotReachable
@@ -62,12 +91,25 @@ enum IQClient {
         var timeout = timeval(tv_sec: 30, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
-        let data = try JSONEncoder().encode(request)
-        guard UnixSocketIO.writeFrame(data, fd: fd) else { throw IQClientError.appNotReachable }
-
-        guard let responseData = UnixSocketIO.readLine(fd: fd) else {
+        guard let data = try? JSONEncoder().encode(request) else {
             throw IQClientError.malformedResponse
         }
-        return try JSONDecoder().decode(CLIResponse.self, from: responseData)
+        guard UnixSocketIO.writeFrame(data, fd: fd) else { throw IQClientError.appNotReachable }
+
+        let responseData: Data
+        do {
+            responseData = try UnixSocketIO.readFrame(fd: fd)
+        } catch let error as FrameReadError {
+            // Nothing at all came back: the app isn't listening in any useful sense, so the
+            // launch-and-retry path is the right response. Anything else means it answered.
+            if case .noData = error { throw IQClientError.appNotReachable }
+            throw IQClientError.truncatedResponse(error)
+        }
+
+        do {
+            return try JSONDecoder().decode(CLIResponse.self, from: responseData)
+        } catch {
+            throw IQClientError.decodeFailed(error)
+        }
     }
 }

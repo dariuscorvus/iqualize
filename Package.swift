@@ -75,7 +75,7 @@ let package = Package(
         // the test bundle.
         .testTarget(
             name: "iQualizeTests",
-            dependencies: ["iQualize"],
+            dependencies: ["iQualize", "IQControlProtocol", "iqualize-cli"],
             path: "Tests/iQualizeTests"
         ),
     ],
