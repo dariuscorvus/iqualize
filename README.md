@@ -37,7 +37,7 @@ eqMac uses a virtual audio driver. iQualize uses a CATap — Apple's native syst
 
 Grab the latest `.dmg` from [Releases](https://github.com/DariusCorvus/iqualize/releases), open it, and drag iQualize to Applications.
 
-iQualize is unsigned — Apple charges $99/year for a developer certificate and the app isn't notarized. macOS puts a quarantine flag on anything downloaded from the web, and for an unsigned app that shows up as **"iQualize is damaged and can't be opened"** (macOS Sequoia/Tahoe) or a generic "unidentified developer" block. It isn't actually damaged. After dragging it to Applications, clear the flag once:
+iQualize is signed with an ad-hoc signature, not a Developer ID certificate, and it isn't notarized. macOS puts a quarantine flag on anything downloaded from the web, and for an app it can't verify that shows up as **"Apple could not verify 'iQualize' is free of malware that may harm your Mac or compromise your privacy"** on macOS Tahoe, or an "unidentified developer" block on older versions. Nothing is wrong with the download — Gatekeeper is reporting that the app hasn't been through Apple's notarization service, which requires a paid developer account. After dragging it to Applications, clear the flag once:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/iQualize.app
@@ -45,7 +45,9 @@ xattr -dr com.apple.quarantine /Applications/iQualize.app
 
 Then open it normally. If the `.dmg` itself won't mount, clear the flag on the download first: `xattr -c ~/Downloads/iQualize-*.dmg`.
 
-Not comfortable with Terminal? On macOS Sequoia and Tahoe there's a GUI path: try opening iQualize once (you'll get the "damaged"/blocked dialog), then go to **System Settings → Privacy & Security → Security** and click **Open Anyway** next to the message about iQualize, confirming with your admin password. Older macOS versions expose the same option under **System Preferences → Security & Privacy → General** instead.
+Not comfortable with Terminal? There's a GUI path: try opening iQualize once and dismiss the warning, then go to **System Settings → Privacy & Security → Security** and click **Open Anyway** next to the message about iQualize, confirming with your admin password. Older macOS versions expose the same option under **System Preferences → Security & Privacy → General** instead.
+
+If you ever see **"iQualize is damaged and can't be opened"** instead, that is a different problem — a genuinely broken signature rather than a missing one. That was [#115](https://github.com/DariusCorvus/iqualize/issues/115), fixed in 0.45.0; report it if a current release does this.
 
 ### Build from source
 
