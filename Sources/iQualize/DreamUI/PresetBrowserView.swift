@@ -37,10 +37,29 @@ struct PresetBrowserView: View {
     private enum LoadState { case loading, loaded, failed(String) }
 
     private var filteredProducts: [OPRAProductEntry] {
-        guard !searchText.isEmpty else { return products }
+        Self.filter(products, matching: searchText)
+    }
+
+    /// Products whose "Vendor Product" label contains `query` (case-insensitive). An empty
+    /// query matches everything. Pure so the selection-invalidation rule (#155) is testable
+    /// without a live view.
+    static func filter(_ products: [OPRAProductEntry], matching query: String) -> [OPRAProductEntry] {
+        guard !query.isEmpty else { return products }
         return products.filter {
-            "\($0.vendorName) \($0.productName)".localizedCaseInsensitiveContains(searchText)
+            "\($0.vendorName) \($0.productName)".localizedCaseInsensitiveContains(query)
         }
+    }
+
+    /// The selection to keep after `query` changes: the current `selection` when it still
+    /// appears in the filtered results, otherwise `nil`. Clearing a query that still contains
+    /// the selection preserves it (#155).
+    static func validatedSelection(
+        _ selection: String?,
+        in products: [OPRAProductEntry],
+        matching query: String
+    ) -> String? {
+        guard let selection else { return nil }
+        return filter(products, matching: query).contains { $0.id == selection } ? selection : nil
     }
 
     private var filteredHiddenPresets: [EQPresetData] {
@@ -89,7 +108,20 @@ struct PresetBrowserView: View {
         // Clear the search when switching catalogs — a term left over from OPRA
         // otherwise filters the iQualize tab and hides deleted built-ins that are
         // actually there, ready to restore (#115).
-        .onChange(of: catalog) { searchText = "" }
+        .onChange(of: catalog) {
+            searchText = ""
+            // Drop any OPRA selection so switching away and back doesn't restore a
+            // stale detail pane (#155).
+            selectedProductID = nil
+        }
+        // Editing the search can filter the selected product out of the sidebar. The
+        // detail pane derives from `filteredProducts`, so a dropped selection already
+        // falls back to the placeholder, but clear the id too so the selection doesn't
+        // silently reappear when the query is cleared again (#155).
+        .onChange(of: searchText) {
+            selectedProductID = Self.validatedSelection(
+                selectedProductID, in: products, matching: searchText)
+        }
     }
 
     // MARK: - Search
@@ -229,7 +261,8 @@ struct PresetBrowserView: View {
     private var detail: some View {
         switch catalog {
         case .opra:
-            if let selectedProductID, let product = products.first(where: { $0.id == selectedProductID }) {
+            if let selectedProductID,
+               let product = filteredProducts.first(where: { $0.id == selectedProductID }) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("\(product.vendorName) \(product.productName)")
                         .font(.headline)
