@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let importLog = OSLog(subsystem: "com.iqualize", category: "import")
 
 // MARK: - Errors
 
@@ -32,6 +35,71 @@ struct ParsedPreset {
 
 enum PresetImporter {
 
+    // MARK: Validation
+
+    /// Substitute for a non-finite imported value, per field. A non-finite value carries
+    /// no intent, so it becomes the neutral default rather than a range endpoint.
+    private enum Fallback {
+        static let frequency: Float = 1000
+        static let gain: Float = 0
+        static let bandwidth: Float = 1.0
+    }
+
+    /// Forces one imported value finite and in-range. `min`/`max` propagate NaN, so the
+    /// finite check has to come before the clamp.
+    private static func sanitize(_ value: Float, fallback: Float, range: ClosedRange<Float>) -> Float {
+        (value.isFinite ? value : fallback).clamped(to: range)
+    }
+
+    /// The single point where imported parameters become DSP input. Every import format
+    /// funnels through here, so a band reaching `BiquadFilterChain` is always finite and
+    /// inside `EQBand.frequencyRange` / `gainRange` / `bandwidthRange` — the same ranges
+    /// the CLI and GUI clamp to (#166).
+    ///
+    /// Clamping is silent: an out-of-range value is corrected and logged, never rejected.
+    /// A file that is 90% sane should still import.
+    private static func clamped(_ bands: [EQBand]) -> [EQBand] {
+        var adjusted = 0
+        let result = bands.map { band -> EQBand in
+            let clamped = EQBand(
+                frequency: sanitize(band.frequency, fallback: Fallback.frequency, range: EQBand.frequencyRange),
+                gain: sanitize(band.gain, fallback: Fallback.gain, range: EQBand.gainRange),
+                bandwidth: sanitize(band.bandwidth, fallback: Fallback.bandwidth, range: EQBand.bandwidthRange),
+                filterType: band.filterType,
+                muted: band.muted,
+                id: band.id
+            )
+            if clamped != band { adjusted += 1 }
+            return clamped
+        }
+
+        if adjusted > 0 {
+            os_log(.default, log: importLog,
+                   "clamped %d of %d imported band(s) into the valid parameter ranges",
+                   adjusted, bands.count)
+        }
+        return result
+    }
+
+    /// Preamp/output gain feed the gain stages rather than the filters, so they are only
+    /// checked for finiteness — a non-finite value would silently mute or blow up the
+    /// render path.
+    private static func finiteOrNil(_ value: Float?) -> Float? {
+        guard let value, value.isFinite else { return nil }
+        return value
+    }
+
+    /// Applies the clamp to a parse result. Every `parse` return path goes through this.
+    private static func validated(_ parsed: ParsedPreset) -> ParsedPreset {
+        ParsedPreset(
+            name: parsed.name,
+            bands: clamped(parsed.bands),
+            rightBands: parsed.rightBands.map { clamped($0) },
+            inputGainDB: finiteOrNil(parsed.inputGainDB),
+            outputGainDB: finiteOrNil(parsed.outputGainDB)
+        )
+    }
+
     /// Turns a format-agnostic parse result into a real, savable preset — new UUID,
     /// never built-in.
     static func makePreset(from parsed: ParsedPreset, name: String) -> EQPresetData {
@@ -59,7 +127,13 @@ enum PresetImporter {
         return base
     }
 
+    /// Parses any supported preset file. Every band the result carries is finite and
+    /// in-range, whatever the file said — see `clamped(_:)`.
     static func parse(data: Data, filename: String) throws -> ParsedPreset {
+        validated(try parseRaw(data: data, filename: filename))
+    }
+
+    private static func parseRaw(data: Data, filename: String) throws -> ParsedPreset {
         if let decoded = try? JSONDecoder().decode(EQPresetData.self, from: data), !decoded.bands.isEmpty {
             return ParsedPreset(
                 name: decoded.name.isEmpty ? nil : decoded.name,
