@@ -2,6 +2,14 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.57.1] - 2026-08-01
+
+### Fixed
+- Two build warnings: `AppIcon.icns` is now excluded from the `iQualize` target (it is copied into the bundle by `scripts/install.sh`, not by SwiftPM), and the no-op `@preconcurrency` on `MenuBarController`'s `NSMenuDelegate` conformance is removed.
+
+### Added
+- `.github/workflows/ci.yml` — builds every target and runs all 82 tests on each pull request and each push to `main`, checks `Package.resolved` is consistent, and fails if the unique compiler-warning count rises above `.github/warning-baseline.txt`. The x86_64 slice builds on `main` and weekly, not on pull requests.
+
 ## [0.57.0] - 2026-08-01
 
 ### Changed

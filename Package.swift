@@ -42,7 +42,7 @@ let package = Package(
                 "IQRingAtomics",
             ],
             path: "Sources/iQualize",
-            exclude: ["Info.plist"],
+            exclude: ["Info.plist", "AppIcon.icns"],
             linkerSettings: [
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AudioToolbox"),

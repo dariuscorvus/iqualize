@@ -3,7 +3,7 @@ import IQControlProtocol
 
 @available(macOS 14.2, *)
 @MainActor
-final class MenuBarController: NSObject, @preconcurrency NSMenuDelegate, CLICommandHandling {
+final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     private var statusItem: NSStatusItem!
     private let audioEngine: AudioEngine
     private let presetStore: PresetStore

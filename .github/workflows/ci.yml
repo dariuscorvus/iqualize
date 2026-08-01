@@ -1,0 +1,61 @@
+# CI: build every target and run every test on each pull request and on each
+# push to main. This is the check that gates merges — release.yml only runs
+# after a version tag, which is too late to prevent a regression landing.
+#
+# The warnings step compares the unique-warning count against
+# .github/warning-baseline.txt. New warnings fail the job; fixing warnings and
+# forgetting to lower the baseline also fails it, so the number stays honest.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC — keeps the x86_64 slice honest
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test (arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Report the toolchain
+        run: swift --version
+
+      - name: Check Package.resolved is consistent with Package.swift
+        run: |
+          swift package resolve
+          git diff --exit-code Package.resolved || {
+            echo "Package.resolved is out of date — commit the result of 'swift package resolve'" >&2
+            exit 1
+          }
+
+      - name: Build all targets, including tests
+        run: |
+          set -o pipefail
+          swift build --build-tests 2>&1 | tee /tmp/build.log
+
+      - name: Check the warning count against the baseline
+        run: bash .github/scripts/check-warnings.sh /tmp/build.log
+
+      - name: Run tests
+        run: swift test --skip-build
+
+  # The Intel slice is what create-dmg.sh ships, but cross-compiling it doubles
+  # PR latency for a path that rarely breaks on its own. Keep it off pull
+  # requests; run it on main and weekly.
+  build-x86_64:
+    name: Build (x86_64 slice)
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the x86_64 slice
+        run: swift build --arch x86_64
