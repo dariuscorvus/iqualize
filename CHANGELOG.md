@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.57.3] - 2026-08-01
+
+### Fixed
+- Imported presets could put `NaN` into the audio path permanently (#166). `PresetImporter` built `EQBand` values straight from AutoEQ, OPRA, and native-JSON files with no validation — the only writer into the DSP that did not clamp. An AutoEQ line with `Q 0.0` makes `qToOctaves(0)` return `+Infinity`, the cookbook coefficients evaluate to `NaN`, and that `NaN` latches in `BiquadFilterChain`'s Direct-Form-II-Transposed state for every subsequent sample, because the chain is never reset. The limiter cannot help: `NaN` propagates through it. Every import format now clamps to the same `EQBand.frequencyRange` / `gainRange` / `bandwidthRange` the CLI and GUI use, silently and with a log line. `BiquadResponse.coefficients` additionally clamps the band center against Nyquist for the runtime sample rate and returns passthrough rather than publishing a non-finite coefficient. Coefficients for in-range input are unchanged.
+
 ## [0.57.2] - 2026-08-01
 
 ### Fixed
