@@ -1,6 +1,9 @@
 import Darwin
 import Foundation
 import IQControlProtocol
+import os.log
+
+private let cliLog = OSLog(subsystem: "com.iqualize", category: "cli")
 
 /// Methods the CLI control channel can invoke, implemented by `MenuBarController`. All
 /// isolated to the main actor since they touch `AudioEngine`/`PresetStore`/window state.
@@ -169,7 +172,7 @@ final class CLIControlServer: @unchecked Sendable {
         var timeout = timeval(tv_sec: 5, tv_usec: 0)
         setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
-        guard let requestData = UnixSocketIO.readLine(fd: clientFD),
+        guard let requestData = try? UnixSocketIO.readFrame(fd: clientFD),
               let request = try? JSONDecoder().decode(CLIRequest.self, from: requestData) else {
             Self.writeResponse(.failure("malformed request"), to: clientFD)
             close(clientFD)
@@ -448,7 +451,16 @@ final class CLIControlServer: @unchecked Sendable {
     // MARK: - Raw I/O helpers
 
     private static func writeResponse(_ response: CLIResponse, to fd: Int32) {
-        guard let data = try? JSONEncoder().encode(response) else { return }
-        UnixSocketIO.writeFrame(data, fd: fd)
+        guard let data = try? JSONEncoder().encode(response) else {
+            os_log(.error, log: cliLog, "failed to encode CLI response")
+            return
+        }
+        // A dropped response leaves the CLI reporting a transport failure with no trace on
+        // this side; #167 was diagnosed the hard way for exactly that reason.
+        if !UnixSocketIO.writeFrame(data, fd: fd) {
+            os_log(.error, log: cliLog,
+                   "failed to write %{public}d-byte CLI response errno=%{public}d",
+                   data.count, errno)
+        }
     }
 }
