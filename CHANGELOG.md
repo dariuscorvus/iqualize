@@ -2,6 +2,12 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.57.2] - 2026-08-01
+
+### Fixed
+- `getDeviceUID`/`getDeviceName` leaked a `CFString` on every call. CoreAudio returns those properties at +1, and both read into a `var uid: CFString` whose address was passed to `AudioObjectGetPropertyData` — which also formed a raw pointer to a variable holding an object reference, the two `CoreAudioHelpers.swift` warnings. Both now read into an `Unmanaged<CFString>?` and consume it with `takeRetainedValue()` through one shared helper.
+- The remaining 20 build warnings, so the CI baseline is 0: an actor-isolation warning in the import-name notification observer (`DreamViewModel.swift:841`), three `var` bindings that are never mutated (`EQCanvasView.swift`), and 15 in the test suite (`PresetStoreTests` setUp/tearDown made `async` so the overrides stay main-actor isolated; `PresetBrowserSelectionTests` marked `@MainActor`).
+
 ## [0.57.1] - 2026-08-01
 
 ### Fixed

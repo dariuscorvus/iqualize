@@ -240,11 +240,10 @@ struct EQCanvasView: View {
                 let g = bandResponseDB(f: f, band: b)
                 pts.append(CGPoint(x: x, y: gainToY(g, H: H, maxDB: displayMax)))
             }
-            var fillPath = smoothClosedPath(pts: pts, baselineY: zero)
+            let fillPath = smoothClosedPath(pts: pts, baselineY: zero)
             ctx.fill(fillPath, with: .color(Color(rgba: 0x60a5fa, a: fillAlpha)))
-            var line = smoothPath(pts: pts)
+            let line = smoothPath(pts: pts)
             ctx.stroke(line, with: .color(Color(rgba: 0x60a5fa, a: strokeAlpha)), lineWidth: isSel ? 1.2 : 0.7)
-            _ = fillPath; _ = line // silence "unused" if elided
         }
 
         // Composite EQ curve
@@ -257,7 +256,7 @@ struct EQCanvasView: View {
             samples.append(CGPoint(x: x, y: gainToY(total, H: H, maxDB: displayMax)))
         }
         let zero = gainToY(0, H: H, maxDB: displayMax)
-        var compositeFill = smoothClosedPath(pts: samples, baselineY: zero)
+        let compositeFill = smoothClosedPath(pts: samples, baselineY: zero)
         let grd = Gradient(stops: [
             .init(color: Color(rgba: 0x3b82f6, a: 0.32), location: 0),
             .init(color: Color(rgba: 0x3b82f6, a: 0.05), location: 0.5),
