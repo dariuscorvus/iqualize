@@ -40,14 +40,13 @@ struct PresetBrowserView: View {
         Self.filter(products, matching: searchText)
     }
 
-    /// Products whose "Vendor Product" label contains `query` (case-insensitive). An empty
-    /// query matches everything. Pure so the selection-invalidation rule (#155) is testable
-    /// without a live view.
+    /// Products matching `query` against their "Vendor Product" label, normalized so that
+    /// spacing, hyphens, underscores, punctuation, case, and diacritics don't change the result
+    /// set (#156) — `HD800S`, `HD 800 S`, and `HD-800-S` all match the same models. Results are
+    /// ranked best-tier-first and deterministically ordered. An empty query matches everything.
+    /// Pure so the selection-invalidation rule (#155) is testable without a live view.
     static func filter(_ products: [OPRAProductEntry], matching query: String) -> [OPRAProductEntry] {
-        guard !query.isEmpty else { return products }
-        return products.filter {
-            "\($0.vendorName) \($0.productName)".localizedCaseInsensitiveContains(query)
-        }
+        OPRASearch.filter(products, matching: query)
     }
 
     /// The selection to keep after `query` changes: the current `selection` when it still
