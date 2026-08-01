@@ -98,6 +98,7 @@ jobs:
         run: |
           bash .github/scripts/release-highlights.sh body "${GITHUB_REF_NAME}" > /tmp/highlights.md
           bash .github/scripts/release-highlights.sh title "${GITHUB_REF_NAME}" > /tmp/title.txt
+          bash .github/scripts/release-highlights.sh song "${GITHUB_REF_NAME}" > /tmp/song.md
 
       - name: Create the release
         if: github.event_name == 'push'
@@ -112,5 +113,18 @@ jobs:
             --notes "$(cat /tmp/highlights.md "$install_note" /tmp/thanks.md)" \
             --generate-notes \
             iQualize-*.dmg
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # The song signs off at the very bottom, below GitHub's generated
+      # "What's Changed" — which --generate-notes always appends after --notes,
+      # so it can't be placed there in the create call. No-op when unset.
+      - name: Append the release song
+        if: github.event_name == 'push'
+        run: |
+          [ -s /tmp/song.md ] || exit 0
+          gh release view "${GITHUB_REF_NAME}" --json body --jq .body > /tmp/body.md
+          cat /tmp/song.md >> /tmp/body.md
+          gh release edit "${GITHUB_REF_NAME}" --notes-file /tmp/body.md
         env:
           GH_TOKEN: ${{ github.token }}
