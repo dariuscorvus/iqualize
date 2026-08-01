@@ -93,6 +93,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      - name: Assemble the curated highlights and title
+        if: github.event_name == 'push'
+        run: |
+          bash .github/scripts/release-highlights.sh body "${GITHUB_REF_NAME}" > /tmp/highlights.md
+          bash .github/scripts/release-highlights.sh title "${GITHUB_REF_NAME}" > /tmp/title.txt
+
       - name: Create the release
         if: github.event_name == 'push'
         run: |
@@ -102,8 +108,8 @@ jobs:
             install_note=.github/release-notes/install-unsigned.md
           fi
           gh release create "${GITHUB_REF_NAME}" \
-            --title "iQualize ${GITHUB_REF_NAME}" \
-            --notes "$(cat "$install_note" /tmp/thanks.md)" \
+            --title "$(cat /tmp/title.txt)" \
+            --notes "$(cat /tmp/highlights.md "$install_note" /tmp/thanks.md)" \
             --generate-notes \
             iQualize-*.dmg
         env:
