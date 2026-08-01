@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.57.0] - 2026-08-01
+
+### Changed
+- OPRA headphone search now normalizes spacing, hyphens, underscores, punctuation, case, and diacritics before matching, so equivalent model names return the same result set (#156). `Sennheiser HD800S`, `HD 800 S`, `HD-800-S`, and `hd_800_s` all resolve to the same product — previously a literal `contains` returned 3 vs. 27 profiles for the same headphone depending on spelling. Matching is extracted into a testable `OPRASearch` domain type outside the SwiftUI view, ranked exact-display → exact-normalized → prefix → substring with deterministic tie-breaking on catalog order. Manufacturer-only and partial-model queries still work; OPRA loading, caching, and import are unchanged.
+
 ## [0.56.0] - 2026-07-31
 
 ### Added
