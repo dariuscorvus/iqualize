@@ -57,7 +57,7 @@ The GUI route works too, but it takes four screens and the first one looks like 
 
 **2. Go to System Settings → Privacy & Security**, and scroll to **Security**. The blocked app now appears with an **Open Anyway** button. This row only shows up after step 1, which is why the order matters.
 
-<img src="./assets/gatekeeper-2-open-anyway.webp" alt="System Settings Privacy and Security: iQualize was blocked to protect your Mac, with an Open Anyway button" width="560">
+<img src="./assets/gatekeeper-2-open-anyway.webp" alt="System Settings Privacy and Security: iQualize was blocked to protect your Mac, with an Open Anyway button" width="620">
 
 **3. Confirm.** macOS asks a second time, more sternly, and may ask for your password. Click **Open Anyway**.
 
