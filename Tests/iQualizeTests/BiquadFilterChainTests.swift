@@ -43,4 +43,74 @@ final class BiquadFilterChainTests: XCTestCase {
 
         XCTAssertTrue(buffer.allSatisfy { $0.isFinite })
     }
+
+    func testCoefficientRampCompletesAfterConfiguredFrameCount() {
+        let chain = BiquadFilterChain(bands: [band(1000, gain: 0)], sampleRate: 48000)
+        chain.updateCoefficients(
+            bands: [band(1000, gain: 12)],
+            sampleRate: 48000
+        )
+
+        XCTAssertEqual(chain.rampStateForTesting().frames, BiquadFilterChain.coefficientRampFrames)
+        XCTAssertEqual(chain.rampStateForTesting().position, 0)
+
+        var buffer = [Float](repeating: 0, count: Int(BiquadFilterChain.coefficientRampFrames))
+        buffer[0] = 1
+        buffer.withUnsafeMutableBufferPointer { pointer in
+            chain.process(pointer.baseAddress!, frameCount: pointer.count)
+        }
+
+        let ramp = chain.rampStateForTesting()
+        XCTAssertEqual(ramp.position, BiquadFilterChain.coefficientRampFrames)
+        XCTAssertEqual(ramp.frames, BiquadFilterChain.coefficientRampFrames)
+        XCTAssertTrue(buffer.allSatisfy { $0.isFinite })
+    }
+
+    func testResetPublishesZeroStateWithoutDroppingFilterConfiguration() {
+        let chain = BiquadFilterChain(bands: [band(1000, gain: 6)], sampleRate: 48000)
+        var impulse = [Float](repeating: 0, count: 128)
+        impulse[0] = 1
+        impulse.withUnsafeMutableBufferPointer { pointer in
+            chain.process(pointer.baseAddress!, frameCount: pointer.count)
+        }
+        XCTAssertTrue(impulse.dropFirst().contains { $0 != 0 })
+
+        chain.reset()
+
+        XCTAssertEqual(chain.currentSnapshotCounts().bands, 1)
+        let ramp = chain.rampStateForTesting()
+        XCTAssertEqual(ramp.frames, 0)
+        XCTAssertEqual(ramp.position, 0)
+
+        var silence = [Float](repeating: 0, count: 128)
+        silence.withUnsafeMutableBufferPointer { pointer in
+            chain.process(pointer.baseAddress!, frameCount: pointer.count)
+        }
+        XCTAssertTrue(silence.allSatisfy { $0 == 0 })
+    }
+
+    func testPresetResetStartsWithZeroStateWhileStillRampingCoefficients() {
+        let chain = BiquadFilterChain(bands: [band(1000, gain: 0)], sampleRate: 48000)
+        var impulse = [Float](repeating: 0, count: 128)
+        impulse[0] = 1
+        impulse.withUnsafeMutableBufferPointer { pointer in
+            chain.process(pointer.baseAddress!, frameCount: pointer.count)
+        }
+
+        chain.updateCoefficients(
+            bands: [band(1000, gain: 12)],
+            sampleRate: 48000,
+            resetState: true
+        )
+
+        let ramp = chain.rampStateForTesting()
+        XCTAssertEqual(ramp.frames, BiquadFilterChain.coefficientRampFrames)
+        XCTAssertEqual(ramp.position, 0)
+
+        var silence = [Float](repeating: 0, count: 128)
+        silence.withUnsafeMutableBufferPointer { pointer in
+            chain.process(pointer.baseAddress!, frameCount: pointer.count)
+        }
+        XCTAssertTrue(silence.allSatisfy { $0 == 0 })
+    }
 }

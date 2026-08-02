@@ -2,6 +2,7 @@ import CoreAudio
 import AudioToolbox
 import AVFAudio
 import Foundation
+import IQRingAtomics
 import Observation
 import os.log
 
@@ -24,30 +25,166 @@ func defaultOutputDeviceChanged(previousUID: String?, currentUID: String?) -> Bo
 // defined inside a @MainActor class — because Swift 6 strict concurrency inserts
 // runtime isolation checks that crash on non-main threads.
 
-nonisolated(unsafe) private var rtCaptureClient: CaptureClient?
-nonisolated(unsafe) private var rtChannelCount: UInt32 = 2
-
 /// Scratch buffer for deinterleaving (allocated once, reused).
 nonisolated(unsafe) private var rtScratchBuffer: UnsafeMutablePointer<Float>?
 nonisolated(unsafe) private var rtScratchCapacity: Int = 0
-nonisolated(unsafe) private var rtBalanceLeft: Float = 1.0
-nonisolated(unsafe) private var rtBalanceRight: Float = 1.0
-nonisolated(unsafe) private var rtInputGain: Float = 1.0
-/// Multiplies back the stereo-pair headroom attenuation of the mixdown tap
-/// (see GainPolicy.tapHeadroomCompensation). Applied unconditionally — the tap
-/// attenuates in Bypass too, so Bypass must compensate to sound like app-off.
-nonisolated(unsafe) private var rtVolumeCompensation: Float = 1.0
-/// Per-channel biquad filter chains, run in this callback ahead of AVAudioUnitEQ.
-/// Only active when rtBiquadChainActive is true. Two roles, depending on mode:
-/// in split channel mode they carry the full band lists (AVAudioUnitEQ is bypassed
-/// entirely); in linked mode they carry only the bands beyond AVAudioUnitEQ's fixed
-/// native capacity (see AudioEngine.avEQNativeBandCount), so there's no hard cap on
-/// band count in either mode.
-/// Channels 2+ (e.g. 5.1/7.1 surround) pass through unprocessed — per-channel
-/// EQ for >2 channels is a separate feature.
-nonisolated(unsafe) private var rtBiquadChainL: BiquadFilterChain?
-nonisolated(unsafe) private var rtBiquadChainR: BiquadFilterChain?
-nonisolated(unsafe) private var rtBiquadChainActive: Bool = false
+
+/// Complete immutable configuration acquired by the render callback. The
+/// callback-visible fields are raw pointers and scalars, so acquiring them does
+/// not retain a CaptureClient or BiquadFilterChain. The private owner fields
+/// retain those objects off the callback path until the publication quiescence
+/// protocol retires this snapshot.
+struct RenderConfiguration: @unchecked Sendable {
+    let captureClient: UnsafeMutableRawPointer?
+    let channelCount: UInt32
+    let scratchBuffer: UnsafeMutablePointer<Float>?
+    let scratchCapacity: Int
+    let balanceLeft: Float
+    let balanceRight: Float
+    let inputGain: Float
+    /// Multiplies back the stereo-pair headroom attenuation of the mixdown tap
+    /// (see GainPolicy.tapHeadroomCompensation). Applied unconditionally — the tap
+    /// attenuates in Bypass too, so Bypass must compensate to sound like app-off.
+    let volumeCompensation: Float
+    /// Per-channel biquad filter chains, run in this callback ahead of AVAudioUnitEQ.
+    /// In split channel mode they carry the full band lists; in linked mode they
+    /// carry only the bands beyond AVAudioUnitEQ's fixed native capacity. There is
+    /// no bounded internal capacity here: each publication allocates exactly the
+    /// requested chain sizes off the real-time path, preserving unlimited bands.
+    let biquadChainL: UnsafeMutableRawPointer?
+    let biquadChainR: UnsafeMutableRawPointer?
+
+    // These owners are deliberately not read by the render callback. They live
+    // inside the published storage so an old snapshot keeps its raw pointers
+    // valid until the main-actor reclamation pass destroys that storage.
+    private let captureClientOwner: CaptureClient?
+    private let biquadChainLOwner: BiquadFilterChain?
+    private let biquadChainROwner: BiquadFilterChain?
+
+    var biquadChainActive: Bool { biquadChainL != nil || biquadChainR != nil }
+
+    init(
+        captureClient: CaptureClient?,
+        channelCount: UInt32,
+        scratchBuffer: UnsafeMutablePointer<Float>? = nil,
+        scratchCapacity: Int = 0,
+        balanceLeft: Float,
+        balanceRight: Float,
+        inputGain: Float,
+        volumeCompensation: Float,
+        biquadChainL: BiquadFilterChain?,
+        biquadChainR: BiquadFilterChain?
+    ) {
+        self.captureClientOwner = captureClient
+        self.biquadChainLOwner = biquadChainL
+        self.biquadChainROwner = biquadChainR
+        self.captureClient = captureClient.map { Unmanaged.passUnretained($0).toOpaque() }
+        self.channelCount = channelCount
+        self.scratchBuffer = scratchBuffer
+        self.scratchCapacity = scratchCapacity
+        self.balanceLeft = balanceLeft
+        self.balanceRight = balanceRight
+        self.inputGain = inputGain
+        self.volumeCompensation = volumeCompensation
+        self.biquadChainL = biquadChainL.map { Unmanaged.passUnretained($0).toOpaque() }
+        self.biquadChainR = biquadChainR.map { Unmanaged.passUnretained($0).toOpaque() }
+    }
+
+    /// Test-only owner access. The render callback reads only the raw pointer
+    /// fields below and never calls this property.
+    var biquadChainLForTesting: BiquadFilterChain? {
+        guard let biquadChainL else { return nil }
+        return Unmanaged<BiquadFilterChain>.fromOpaque(biquadChainL).takeUnretainedValue()
+    }
+
+    var biquadChainRForTesting: BiquadFilterChain? {
+        guard let biquadChainR else { return nil }
+        return Unmanaged<BiquadFilterChain>.fromOpaque(biquadChainR).takeUnretainedValue()
+    }
+}
+
+struct RenderConfigurationHandle {
+    fileprivate let pointer: UnsafeMutableRawPointer?
+
+    private var storage: UnsafeMutablePointer<RenderConfiguration>? {
+        pointer?.assumingMemoryBound(to: RenderConfiguration.self)
+    }
+
+    // Callback-safe scalar/raw-pointer accessors. Returning the whole struct
+    // would copy its owner references and introduce ARC traffic on the IO
+    // thread, so the callback must use these fields instead.
+    var captureClient: UnsafeMutableRawPointer? { storage?.pointee.captureClient }
+    var channelCount: UInt32 { storage?.pointee.channelCount ?? 0 }
+    var scratchBuffer: UnsafeMutablePointer<Float>? { storage?.pointee.scratchBuffer }
+    var scratchCapacity: Int { storage?.pointee.scratchCapacity ?? 0 }
+    var balanceLeft: Float { storage?.pointee.balanceLeft ?? 1 }
+    var balanceRight: Float { storage?.pointee.balanceRight ?? 1 }
+    var inputGain: Float { storage?.pointee.inputGain ?? 1 }
+    var volumeCompensation: Float { storage?.pointee.volumeCompensation ?? 1 }
+    var biquadChainL: UnsafeMutableRawPointer? { storage?.pointee.biquadChainL }
+    var biquadChainR: UnsafeMutableRawPointer? { storage?.pointee.biquadChainR }
+
+    /// Test-only value access. Production callback code must use the scalar
+    /// accessors above so the owner references are never copied on the IO path.
+    var configurationForTesting: RenderConfiguration? {
+        storage?.pointee
+    }
+
+    func releaseRead() {
+        rtLeave(rtRenderPublication)
+    }
+}
+
+nonisolated(unsafe) private let rtRenderPublication: UnsafeMutablePointer<RTSnapshotPublication> = {
+    let pointer = UnsafeMutablePointer<RTSnapshotPublication>.allocate(capacity: 1)
+    pointer.initialize(to: RTSnapshotPublication())
+    return pointer
+}()
+
+nonisolated(unsafe) private var retiredRenderConfigurations: [UnsafeMutableRawPointer] = []
+
+func acquireRenderConfigurationForTesting() -> RenderConfigurationHandle {
+    let pointer = rtEnter(rtRenderPublication)
+    return RenderConfigurationHandle(pointer: pointer)
+}
+
+@discardableResult
+func publishRenderConfigurationForTesting(_ configuration: RenderConfiguration?) -> Int {
+    let newPointer: UnsafeMutableRawPointer? = configuration.map { value in
+        let pointer = UnsafeMutablePointer<RenderConfiguration>.allocate(capacity: 1)
+        pointer.initialize(to: value)
+        return UnsafeMutableRawPointer(pointer)
+    }
+    if let oldPointer = publishSnapshot(rtRenderPublication, newPointer) {
+        retiredRenderConfigurations.append(oldPointer)
+    }
+    // Never wait for a zero-reader window during an ordinary configuration
+    // update. Audio callbacks may run continuously. A later main-thread pass
+    // reclaims retired storage once the reader count reaches zero.
+    _ = reclaimQuiescentRenderConfigurationsForTesting()
+    return retiredRenderConfigurations.count
+}
+
+@discardableResult
+func reclaimQuiescentRenderConfigurationsForTesting() -> Int {
+    let readers = withUnsafePointer(to: &rtRenderPublication.pointee.readers) { pointer in
+        iq_load_snapshot_readers(pointer)
+    }
+    guard readers == 0 else { return retiredRenderConfigurations.count }
+    let retired = retiredRenderConfigurations
+    retiredRenderConfigurations.removeAll(keepingCapacity: true)
+    for oldPointer in retired {
+        let pointer = oldPointer.assumingMemoryBound(to: RenderConfiguration.self)
+        pointer.deinitialize(count: 1)
+        pointer.deallocate()
+    }
+    return retiredRenderConfigurations.count
+}
+
+private func waitAndReclaimRenderConfigurations() {
+    waitForSnapshotQuiescence(rtRenderPublication)
+    _ = reclaimQuiescentRenderConfigurationsForTesting()
+}
 
 /// AVAudioSourceNode render block: pulls interleaved audio from the capture
 /// client's shared ring buffer, deinterleaves into separate channel buffers
@@ -58,48 +195,74 @@ private func renderCallback(
     frameCount: UInt32,
     audioBufferList: UnsafeMutablePointer<AudioBufferList>
 ) -> OSStatus {
-    guard let client = rtCaptureClient else { return noErr }
-    let ch = Int(rtChannelCount)
-    let frames = Int(frameCount)
-    let interleavedCount = frames * ch
     let bufferList = UnsafeMutableAudioBufferListPointer(audioBufferList)
-
-    // Preallocated in start() for the AU's maximumFramesPerSlice default;
-    // growing here on the audio thread is a never-expected fallback.
-    if rtScratchCapacity < interleavedCount {
-        rtScratchBuffer?.deallocate()
-        rtScratchBuffer = .allocate(capacity: interleavedCount)
-        rtScratchCapacity = interleavedCount
+    let handle = acquireRenderConfigurationForTesting()
+    guard let client = handle.captureClient else {
+        renderSilence(bufferList, frameCount: Int(frameCount))
+        handle.releaseRead()
+        return noErr
     }
-    guard let scratch = rtScratchBuffer else { return noErr }
+    let ch = Int(handle.channelCount)
+    let frames = Int(frameCount)
+    let interleavedCount = frames.multipliedReportingOverflow(by: ch)
+
+    // The render path never grows storage. The engine preallocates for the
+    // audio unit's maximum slice during start; an unexpected oversized slice
+    // is rendered as silence rather than allocating on the IO thread.
+    guard !interleavedCount.overflow,
+          renderScratchCapacityAllows(frameCount: frames, channelCount: ch,
+                                      scratchCapacity: handle.scratchCapacity),
+          let scratch = handle.scratchBuffer else {
+        renderSilence(bufferList, frameCount: frames)
+        handle.releaseRead()
+        return noErr
+    }
+    let sampleCount = interleavedCount.partialValue
 
     // All-or-nothing: a full drift-compensated block (#133), or silence
     // while the ring seeds / after an underrun.
-    if client.readResampled(scratch, frames: frames) == 0 {
-        scratch.initialize(repeating: 0.0, count: interleavedCount)
+    if CaptureClient.readResampledRT(client, destination: scratch, frames: frames) == 0 {
+        scratch.initialize(repeating: 0.0, count: sampleCount)
     }
 
     for i in 0..<bufferList.count {
         guard let outData = bufferList[i].mData?.assumingMemoryBound(to: Float.self) else { continue }
-        let balance = i == 0 ? rtBalanceLeft : rtBalanceRight
+        let balance = i == 0 ? handle.balanceLeft : handle.balanceRight
         deinterleaveChannel(scratch, into: outData, channel: i, channelCount: ch,
-                            frames: frames, gain: rtInputGain * balance * rtVolumeCompensation)
+                            frames: frames, gain: handle.inputGain * balance * handle.volumeCompensation)
     }
 
     // Apply per-channel biquad EQ when a chain is configured — either the whole
     // preset in split channel mode (AVAudioUnitEQ bypassed), or the overflow
     // bands beyond AVAudioUnitEQ's native capacity in linked mode (runs ahead
     // of it in the graph, feeding it already-partially-EQ'd audio).
-    if rtBiquadChainActive {
+    if handle.biquadChainL != nil || handle.biquadChainR != nil {
         if bufferList.count > 0, let outL = bufferList[0].mData?.assumingMemoryBound(to: Float.self) {
-            rtBiquadChainL?.process(outL, frameCount: frames)
+            if let chain = handle.biquadChainL {
+                BiquadFilterChain.processRT(chain, buffer: outL, frameCount: frames)
+            }
         }
         if bufferList.count > 1, let outR = bufferList[1].mData?.assumingMemoryBound(to: Float.self) {
-            rtBiquadChainR?.process(outR, frameCount: frames)
+            if let chain = handle.biquadChainR {
+                BiquadFilterChain.processRT(chain, buffer: outR, frameCount: frames)
+            }
         }
     }
 
+    handle.releaseRead()
     return noErr
+}
+
+/// Fill the source node's caller-owned output buffers without allocating. This
+/// is used when the graph is inactive or asks for more frames than the bounded
+/// scratch buffer can hold.
+@inline(__always)
+func renderSilence(_ bufferList: UnsafeMutableAudioBufferListPointer, frameCount: Int) {
+    guard frameCount > 0 else { return }
+    for index in 0..<bufferList.count {
+        guard let data = bufferList[index].mData?.assumingMemoryBound(to: Float.self) else { continue }
+        data.initialize(repeating: 0, count: frameCount)
+    }
 }
 
 /// Copy one channel out of an interleaved buffer, applying the channel's total
@@ -118,6 +281,16 @@ func deinterleaveChannel(
     }
 }
 
+/// The render callback may only use its preallocated scratch storage. An
+/// oversized callback is rendered as silence rather than growing storage on
+/// the real-time thread.
+@inline(__always)
+func renderScratchCapacityAllows(frameCount: Int, channelCount: Int, scratchCapacity: Int) -> Bool {
+    guard frameCount >= 0, channelCount >= 0 else { return false }
+    let (sampleCount, overflow) = frameCount.multipliedReportingOverflow(by: channelCount)
+    return !overflow && sampleCount <= scratchCapacity
+}
+
 // MARK: - AudioEngine
 
 @available(macOS 14.2, *)
@@ -128,6 +301,10 @@ final class AudioEngine {
     /// detail, not a user-facing limit. See the comment at its allocation in start(),
     /// and docs/EQ_BAND_CAPACITY.md for why this can't just be raised.
     private static let avEQNativeBandCount = 31
+    /// The source AU is explicitly bounded before render resources are
+    /// allocated. Requests above this value are rendered as silence rather
+    /// than growing scratch storage on the IO thread.
+    private static let renderMaximumFramesPerSlice: AVAudioFrameCount = 4096
 
     private(set) var isRunning = false
     private(set) var lifecycleState: AudioLifecycleState = .inactive
@@ -150,6 +327,13 @@ final class AudioEngine {
     private var eq: AVAudioUnitEQ?
     private var outputGainEQ: AVAudioUnitEQ?
     private var limiter: AVAudioUnitEffect?
+    private var renderChannelCount: UInt32 = 2
+    private var renderBalanceLeft: Float = 1.0
+    private var renderBalanceRight: Float = 1.0
+    private var renderInputGain: Float = 1.0
+    private var renderVolumeCompensation: Float = 1.0
+    private var renderBiquadChainL: BiquadFilterChain?
+    private var renderBiquadChainR: BiquadFilterChain?
 
     @ObservationIgnored
     nonisolated(unsafe) private var deviceChangeListenerBlock: AudioObjectPropertyListenerBlock?
@@ -217,15 +401,32 @@ final class AudioEngine {
     /// bypassed and restored on un-bypass, without touching the stored/displayed
     /// control values (see #118). The math lives in GainPolicy.
     private func updateInputGain() {
-        rtInputGain = GainPolicy.inputGain(dB: inputGainDB, bypassed: bypassed)
+        renderInputGain = GainPolicy.inputGain(dB: inputGainDB, bypassed: bypassed)
+        publishRenderConfiguration()
     }
 
     private func updateBalance() {
-        (rtBalanceLeft, rtBalanceRight) = GainPolicy.balanceGains(balance, bypassed: bypassed)
+        (renderBalanceLeft, renderBalanceRight) = GainPolicy.balanceGains(balance, bypassed: bypassed)
+        publishRenderConfiguration()
     }
 
     private func updateOutputGain() {
         outputGainEQ?.globalGain = GainPolicy.outputGainDB(outputGainDB, bypassed: bypassed)
+    }
+
+    private func publishRenderConfiguration() {
+        publishRenderConfigurationForTesting(RenderConfiguration(
+            captureClient: captureClient,
+            channelCount: renderChannelCount,
+            scratchBuffer: rtScratchBuffer,
+            scratchCapacity: rtScratchCapacity,
+            balanceLeft: renderBalanceLeft,
+            balanceRight: renderBalanceRight,
+            inputGain: renderInputGain,
+            volumeCompensation: renderVolumeCompensation,
+            biquadChainL: renderBiquadChainL,
+            biquadChainR: renderBiquadChainR
+        ))
     }
 
     var maxGainDB: Float = 12
@@ -318,17 +519,7 @@ final class AudioEngine {
         let sampleRate = client.sampleRate
         let channels = client.channels
         self.outputSampleRate = sampleRate
-        rtCaptureClient = client
-        rtChannelCount = channels
-
-        // Preallocate the render scratch for the AU maximumFramesPerSlice
-        // default (4096) so the render callback never allocates in practice.
-        let scratchFloats = 4096 * Int(channels)
-        if rtScratchCapacity < scratchFloats {
-            rtScratchBuffer?.deallocate()
-            rtScratchBuffer = .allocate(capacity: scratchFloats)
-            rtScratchCapacity = scratchFloats
-        }
+        renderChannelCount = channels
 
         os_log(.default, log: appLog,
                "capture helper sr: %{public}.0f  ch: %{public}u  output: %{public}@",
@@ -348,6 +539,24 @@ final class AudioEngine {
                                    channels: AVAudioChannelCount(channels))!
 
         let sourceNode = AVAudioSourceNode(format: format, renderBlock: renderCallback)
+        sourceNode.auAudioUnit.maximumFramesToRender = Self.renderMaximumFramesPerSlice
+        let maximumFramesPerSlice = Int(sourceNode.auAudioUnit.maximumFramesToRender)
+        guard maximumFramesPerSlice > 0 else {
+            throw NSError(domain: "iQualize", code: -201, userInfo: [
+                NSLocalizedDescriptionKey: "Audio source returned an invalid maximum render slice"
+            ])
+        }
+        let scratchFloats = maximumFramesPerSlice.multipliedReportingOverflow(by: Int(channels))
+        guard !scratchFloats.overflow else {
+            throw NSError(domain: "iQualize", code: -202, userInfo: [
+                NSLocalizedDescriptionKey: "Audio render scratch size overflowed"
+            ])
+        }
+        if rtScratchCapacity < scratchFloats.partialValue {
+            rtScratchBuffer?.deallocate()
+            rtScratchBuffer = .allocate(capacity: scratchFloats.partialValue)
+            rtScratchCapacity = scratchFloats.partialValue
+        }
         self.sourceNode = sourceNode
 
         // AVAudioUnitEQ (Apple's AUNBandEQ) natively processes up to
@@ -396,10 +605,11 @@ final class AudioEngine {
         // guards the restored level. Recomputed on every start(); device
         // switches funnel through the lifecycle coordinator's stop + start path.
         let outputChannels = Int(avEngine.outputNode.outputFormat(forBus: 0).channelCount)
-        rtVolumeCompensation = GainPolicy.tapHeadroomCompensation(outputChannels: outputChannels)
+        renderVolumeCompensation = GainPolicy.tapHeadroomCompensation(outputChannels: outputChannels)
+        publishRenderConfiguration()
         os_log(.default, log: appLog,
                "output hw channels: %{public}d  tap headroom compensation: x%{public}.1f",
-               outputChannels, rtVolumeCompensation)
+               outputChannels, renderVolumeCompensation)
 
         // Retain the graph before starting it so a thrown start() can still be
         // stopped by the shared teardown path.
@@ -498,11 +708,12 @@ final class AudioEngine {
             self.configChangeObserver = nil
         }
 
-        rtCaptureClient = nil
-        rtBiquadChainL = nil
-        rtBiquadChainR = nil
-        rtBiquadChainActive = false
-        rtVolumeCompensation = 1.0
+        // Keep the old owners alive while the graph stops. The callback holds
+        // only opaque pointers, so dropping these properties before the graph
+        // is quiescent would create a use-after-free window.
+        let retiringClient = captureClient
+        let retiringChainL = renderBiquadChainL
+        let retiringChainR = renderBiquadChainR
 
         // Remove spectrum taps before stopping engine
         if sourceTapInstalled {
@@ -521,10 +732,30 @@ final class AudioEngine {
         outputGainEQ = nil
         limiter = nil
 
+        // No new callbacks can start after the graph stops. Retire the
+        // configuration and wait only for a callback that was already in
+        // flight before stopping the engine.
+        captureClient = nil
+        renderBiquadChainL = nil
+        renderBiquadChainR = nil
+        renderVolumeCompensation = 1.0
+        publishRenderConfigurationForTesting(nil)
+        waitAndReclaimRenderConfigurations()
+
         // Terminate the capture helper. It cleans up its own CATap, aggregate,
         // IOProc, and shared memory.
-        captureClient?.stop()
-        captureClient = nil
+        retiringClient?.stop()
+
+        // No callback can dereference the retired configuration now. Release the
+        // scratch storage that the snapshot carried as a raw pointer.
+        rtScratchBuffer?.deallocate()
+        rtScratchBuffer = nil
+        rtScratchCapacity = 0
+
+        // Keep these locals alive until after reclamation so the lifetime proof
+        // remains explicit even if the retired snapshot was already reclaimed.
+        _ = retiringChainL
+        _ = retiringChainR
     }
 
     // MARK: - EQ Control
@@ -544,22 +775,31 @@ final class AudioEngine {
         }
     }
 
-    /// Push `bands` into `rtBiquadChainL`/`R`, creating the chains on first use.
-    private func updateBiquadChains(leftBands: [EQBand], rightBands: [EQBand], sampleRate: Double) {
-        if let chainL = rtBiquadChainL {
-            chainL.updateCoefficients(bands: leftBands, sampleRate: sampleRate)
+    /// Build or update chains off the render thread. Reusing a chain preserves
+    /// delay state and lets its immutable snapshots ramp coefficients during
+    /// live edits. A changed preset identity requests the documented zero-state
+    /// reset while still using the same coefficient ramp.
+    private func updateBiquadChains(
+        leftBands: [EQBand],
+        rightBands: [EQBand],
+        sampleRate: Double,
+        resetState: Bool = false
+    ) {
+        if let chain = renderBiquadChainL {
+            chain.updateCoefficients(bands: leftBands, sampleRate: sampleRate, resetState: resetState)
         } else {
-            rtBiquadChainL = BiquadFilterChain(bands: leftBands, sampleRate: sampleRate)
+            renderBiquadChainL = BiquadFilterChain(bands: leftBands, sampleRate: sampleRate)
         }
-        if let chainR = rtBiquadChainR {
-            chainR.updateCoefficients(bands: rightBands, sampleRate: sampleRate)
+        if let chain = renderBiquadChainR {
+            chain.updateCoefficients(bands: rightBands, sampleRate: sampleRate, resetState: resetState)
         } else {
-            rtBiquadChainR = BiquadFilterChain(bands: rightBands, sampleRate: sampleRate)
+            renderBiquadChainR = BiquadFilterChain(bands: rightBands, sampleRate: sampleRate)
         }
     }
 
     private func applyBands(from old: EQPresetData? = nil) {
         guard let eq else { return }
+        let resetState = old.map { $0.id != activePreset.id } ?? false
 
         if splitChannelActive && !bypassed {
             // Split channel mode: bypass AVAudioUnitEQ, use custom biquad chains
@@ -567,8 +807,13 @@ final class AudioEngine {
             eq.bypass = true
             let leftBands = withEffectiveGain(activePreset.bands)
             let rightBands = withEffectiveGain(activePreset.rightBands ?? activePreset.bands)
-            updateBiquadChains(leftBands: leftBands, rightBands: rightBands, sampleRate: outputSampleRate)
-            rtBiquadChainActive = true
+            updateBiquadChains(
+                leftBands: leftBands,
+                rightBands: rightBands,
+                sampleRate: outputSampleRate,
+                resetState: resetState
+            )
+            publishRenderConfiguration()
         } else {
             // Linked mode: AVAudioUnitEQ natively processes the first
             // Self.avEQNativeBandCount bands; any remaining bands run through
@@ -608,13 +853,22 @@ final class AudioEngine {
 
             if allBands.count > Self.avEQNativeBandCount {
                 let overflowBands = withEffectiveGain(Array(allBands[Self.avEQNativeBandCount...]))
-                updateBiquadChains(leftBands: overflowBands, rightBands: overflowBands, sampleRate: outputSampleRate)
-                rtBiquadChainActive = true
+                updateBiquadChains(
+                    leftBands: overflowBands,
+                    rightBands: overflowBands,
+                    sampleRate: outputSampleRate,
+                    resetState: resetState
+                )
             } else {
-                rtBiquadChainL = nil
-                rtBiquadChainR = nil
-                rtBiquadChainActive = false
+                renderBiquadChainL = nil
+                renderBiquadChainR = nil
+                publishRenderConfiguration()
+                eq.globalGain = 0
+                eq.bypass = bypassed || activePreset.isFlat
+                limiter?.bypass = !peakLimiter || bypassed
+                return
             }
+            publishRenderConfiguration()
 
             eq.globalGain = 0
             eq.bypass = bypassed || activePreset.isFlat

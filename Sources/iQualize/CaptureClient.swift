@@ -447,4 +447,17 @@ final class CaptureClient: @unchecked Sendable {
                              ((ratio - 1) * 1e6).bitPattern)
         return frames
     }
+
+    /// Raw-pointer bridge for the audio callback. AudioEngine's publication
+    /// quiescence protocol keeps the owning CaptureClient alive until every
+    /// reader has left, so this conversion never takes ownership or performs
+    /// callback-side ARC traffic.
+    static func readResampledRT(
+        _ opaque: UnsafeMutableRawPointer,
+        destination: UnsafeMutablePointer<Float>,
+        frames: Int
+    ) -> Int {
+        let client = Unmanaged<CaptureClient>.fromOpaque(opaque).takeUnretainedValue()
+        return client.readResampled(destination, frames: frames)
+    }
 }
