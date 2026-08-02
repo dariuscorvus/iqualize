@@ -1,8 +1,6 @@
 import Foundation
+import IQRingAtomics
 
-// MARK: - Normalized Biquad Coefficients
-
-/// Pre-normalized biquad coefficients (divided by a0) for real-time processing.
 struct NormalizedBiquadCoeffs: Sendable {
     let b0: Float, b1: Float, b2: Float
     let a1: Float, a2: Float
@@ -23,52 +21,121 @@ struct NormalizedBiquadCoeffs: Sendable {
     }
 }
 
-// MARK: - Biquad Filter Chain
+private struct BiquadSnapshot {
+    let coeffs: UnsafeMutablePointer<NormalizedBiquadCoeffs>
+    let z1: UnsafeMutablePointer<Float>
+    let z2: UnsafeMutablePointer<Float>
+    let bandCount: Int
+}
 
-/// Real-time biquad filter chain for per-channel EQ processing.
-/// Maintains filter state (delay elements) per band.
-/// Designed for use on the Core Audio IO thread — no allocations after setup.
+/// Real-time biquad chain with complete immutable coefficient/state snapshots.
+/// Main-actor publication allocates and reclaims snapshots. The callback only
+/// enters the raw-pointer quiescence protocol and mutates the selected state.
 final class BiquadFilterChain: @unchecked Sendable {
-    /// Per-band coefficients.
-    private var coeffs: [NormalizedBiquadCoeffs]
-    /// Per-band delay state: z1, z2 (Direct Form II Transposed).
-    private var z1: [Float]
-    private var z2: [Float]
-    private var bandCount: Int
+    private let publication: UnsafeMutablePointer<RTSnapshotPublication>
+    private var retiredSnapshots: [UnsafeMutableRawPointer] = []
+    private(set) var retiredSnapshotCount = 0
+    private(set) var lastRetirementWasOnMainThread = false
 
     init(bands: [EQBand], sampleRate: Double) {
-        bandCount = bands.count
-        coeffs = bands.map { band in
-            NormalizedBiquadCoeffs(from: BiquadResponse.coefficients(for: band, sampleRate: sampleRate))
-        }
-        z1 = [Float](repeating: 0, count: bandCount)
-        z2 = [Float](repeating: 0, count: bandCount)
+        publication = .allocate(capacity: 1)
+        publication.initialize(to: RTSnapshotPublication())
+        let snapshot = Self.makeSnapshot(bands: bands, sampleRate: sampleRate)
+        _ = publishSnapshot(publication, UnsafeMutableRawPointer(snapshot))
     }
 
-    /// Update coefficients from new band parameters. Resets state if band count changed.
+    deinit {
+        if let retired = publishSnapshot(publication, nil) { retiredSnapshots.append(retired) }
+        waitForSnapshotQuiescence(publication)
+        reclaimQuiescentSnapshots()
+        publication.deinitialize(count: 1)
+        publication.deallocate()
+    }
+
     func updateCoefficients(bands: [EQBand], sampleRate: Double) {
-        let newCount = bands.count
-        let newCoeffs = bands.map { band in
-            NormalizedBiquadCoeffs(from: BiquadResponse.coefficients(for: band, sampleRate: sampleRate))
+        let replacement = Self.makeSnapshot(bands: bands, sampleRate: sampleRate)
+        if let retired = publishSnapshot(publication, UnsafeMutableRawPointer(replacement)) {
+            retiredSnapshots.append(retired)
         }
-
-        if newCount != bandCount {
-            z1 = [Float](repeating: 0, count: newCount)
-            z2 = [Float](repeating: 0, count: newCount)
-            bandCount = newCount
-        }
-
-        coeffs = newCoeffs
+        reclaimQuiescentSnapshots()
     }
 
-    /// Process audio samples in-place using Direct Form II Transposed.
-    /// Called on the Core Audio IO thread.
     func process(_ buffer: UnsafeMutablePointer<Float>, frameCount: Int) {
-        for b in 0..<bandCount {
-            let c = coeffs[b]
-            var s1 = z1[b]
-            var s2 = z2[b]
+        guard let raw = rtEnter(publication) else { return }
+        defer { rtLeave(publication) }
+        Self.processSnapshot(raw.assumingMemoryBound(to: BiquadSnapshot.self).pointee,
+                             buffer: buffer, frameCount: frameCount)
+    }
 
+    static func processRT(_ opaque: UnsafeMutableRawPointer,
+                          buffer: UnsafeMutablePointer<Float>,
+                          frameCount: Int) {
+        let chain = Unmanaged<BiquadFilterChain>.fromOpaque(opaque).takeUnretainedValue()
+        chain.process(buffer, frameCount: frameCount)
+    }
+
+    func reset() {
+        guard let raw = rtEnter(publication) else { return }
+        defer { rtLeave(publication) }
+        let snapshot = raw.assumingMemoryBound(to: BiquadSnapshot.self).pointee
+        for i in 0..<snapshot.bandCount {
+            snapshot.z1[i] = 0
+            snapshot.z2[i] = 0
+        }
+    }
+
+    func currentSnapshotCounts() -> (coefficients: Int, state: Int, bands: Int) {
+        guard let raw = rtEnter(publication) else { return (0, 0, 0) }
+        defer { rtLeave(publication) }
+        let count = raw.assumingMemoryBound(to: BiquadSnapshot.self).pointee.bandCount
+        return (count, count, count)
+    }
+
+    private static func makeSnapshot(bands: [EQBand], sampleRate: Double)
+        -> UnsafeMutablePointer<BiquadSnapshot> {
+        let count = bands.count
+        let coeffs = UnsafeMutablePointer<NormalizedBiquadCoeffs>.allocate(capacity: count)
+        let z1 = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        let z2 = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        for (index, band) in bands.enumerated() {
+            coeffs[index] = NormalizedBiquadCoeffs(
+                from: BiquadResponse.coefficients(for: band, sampleRate: sampleRate))
+            z1[index] = 0
+            z2[index] = 0
+        }
+        let snapshot = UnsafeMutablePointer<BiquadSnapshot>.allocate(capacity: 1)
+        snapshot.initialize(to: BiquadSnapshot(coeffs: coeffs, z1: z1, z2: z2, bandCount: count))
+        return snapshot
+    }
+
+    private static func destroySnapshot(_ snapshot: UnsafeMutablePointer<BiquadSnapshot>) {
+        snapshot.pointee.coeffs.deallocate()
+        snapshot.pointee.z1.deallocate()
+        snapshot.pointee.z2.deallocate()
+        snapshot.deinitialize(count: 1)
+        snapshot.deallocate()
+    }
+
+    private func reclaimQuiescentSnapshots() {
+        guard iq_load_acquire_u32(&publication.pointee.readers) == 0 else { return }
+        let retired = retiredSnapshots
+        retiredSnapshots.removeAll(keepingCapacity: true)
+        for pointer in retired {
+            Self.destroySnapshot(pointer.assumingMemoryBound(to: BiquadSnapshot.self))
+            retiredSnapshotCount += 1
+            lastRetirementWasOnMainThread = Thread.isMainThread
+        }
+    }
+
+    @inline(__always)
+    private static func processSnapshot(_ snapshot: BiquadSnapshot,
+                                        buffer: UnsafeMutablePointer<Float>,
+                                        frameCount: Int) {
+        guard frameCount > 0 else { return }
+        for b in 0..<snapshot.bandCount {
+            let c = snapshot.coeffs[b]
+            var s1 = snapshot.z1[b]
+            var s2 = snapshot.z2[b]
             for f in 0..<frameCount {
                 let x = buffer[f]
                 let y = c.b0 * x + s1
@@ -76,21 +143,10 @@ final class BiquadFilterChain: @unchecked Sendable {
                 s2 = c.b2 * x - c.a2 * y
                 buffer[f] = y
             }
-
-            // Flush denormals to zero
             if abs(s1) < 1e-15 { s1 = 0 }
             if abs(s2) < 1e-15 { s2 = 0 }
-
-            z1[b] = s1
-            z2[b] = s2
-        }
-    }
-
-    /// Reset all filter state (e.g., when switching presets to avoid transients).
-    func reset() {
-        for i in 0..<bandCount {
-            z1[i] = 0
-            z2[i] = 0
+            snapshot.z1[b] = s1
+            snapshot.z2[b] = s2
         }
     }
 }

@@ -27,6 +27,7 @@ final class SpectrumAnalyzer: @unchecked Sendable {
     private let imagp: UnsafeMutablePointer<Float>
     private let magnitudes: UnsafeMutablePointer<Float>
     private let dbMags: UnsafeMutablePointer<Float>
+    private let monoMixScale: UnsafeMutablePointer<Float>
 
     // Smoothing state (owned by audio thread — no synchronization needed)
     private let smoothedMagnitudes: UnsafeMutablePointer<Float>
@@ -64,6 +65,8 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         magnitudes.initialize(repeating: 0, count: 1024)
         dbMags = .allocate(capacity: 1024)
         dbMags.initialize(repeating: 0, count: 1024)
+        monoMixScale = .allocate(capacity: 1)
+        monoMixScale.initialize(to: 0)
 
         smoothedMagnitudes = .allocate(capacity: 128)
         smoothedMagnitudes.initialize(repeating: -90.0, count: 128)
@@ -80,6 +83,7 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         imagp.deallocate()
         magnitudes.deallocate()
         dbMags.deallocate()
+        monoMixScale.deallocate()
         smoothedMagnitudes.deallocate()
         peakMagnitudes.deallocate()
         peakHoldCounters.deallocate()
@@ -101,9 +105,10 @@ final class SpectrumAnalyzer: @unchecked Sendable {
             // Zero mono buffer first
             memset(mono, 0, fftSize * MemoryLayout<Float>.size)
             let scale = 1.0 / Float(channelCount)
+            monoMixScale.pointee = scale
             for ch in 0..<channelCount {
                 // mono[i] += channelData[ch][i] * scale
-                vDSP_vsma(channelData[ch], 1, [scale], mono, 1, mono, 1, vDSP_Length(samplesToProcess))
+                vDSP_vsma(channelData[ch], 1, monoMixScale, mono, 1, mono, 1, vDSP_Length(samplesToProcess))
             }
         }
 
