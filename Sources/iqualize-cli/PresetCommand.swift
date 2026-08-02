@@ -7,6 +7,9 @@ struct PresetCommand: ParsableCommand {
     @Argument(help: "Preset name (case-insensitive) or UUID.")
     var name: String?
 
+    @Flag(help: "Discard unsaved edits instead of failing.")
+    var force = false
+
     @Flag(help: "Show quick usage examples for this command.")
     var tldr = false
 
@@ -18,7 +21,8 @@ struct PresetCommand: ParsableCommand {
 
     func run() {
         if tldr { printTldr(matching: "preset"); return }
-        let response = requireOK(sendOrExit(CLIRequest(command: CLICommand.selectPreset, stringArg: name)))
+        let response = requireOK(sendOrExit(CLIRequest(
+            command: CLICommand.selectPreset, stringArg: name, force: force)))
         if let status = response.status {
             print("Switched to \(status.activePresetName)")
         }

@@ -27,6 +27,7 @@ struct Tldr: ParsableCommand {
         Entry(name: "preset", description: "Switch the active preset by name or ID.", examples: [
             ("Switch to a preset by name", "iqualize preset \"Bass Boost\""),
             ("Switch to a preset by ID", "iqualize preset 3F2504E0-4F89-11D3-9A0C-0305E82C3301"),
+            ("Discard unsaved edits while switching", "iqualize preset --force \"Bass Boost\""),
         ]),
         Entry(name: "bypass", description: "Get or set EQ bypass.", examples: [
             ("Show current bypass state", "iqualize bypass"),

@@ -12,15 +12,19 @@ public struct CLIRequest: Codable, Sendable {
     public var stringArg2: String?
     public var floatArg: Float?
     public var boolArg: Bool?
+    /// Command-specific override for operations that would otherwise require user interaction.
+    /// Optional so requests from older CLI binaries continue to decode.
+    public var force: Bool?
     public var bandArgs: CLIBandArgs?
 
-    public init(command: String, stringArg: String? = nil, stringArg2: String? = nil, floatArg: Float? = nil, boolArg: Bool? = nil, bandArgs: CLIBandArgs? = nil) {
+    public init(command: String, stringArg: String? = nil, stringArg2: String? = nil, floatArg: Float? = nil, boolArg: Bool? = nil, bandArgs: CLIBandArgs? = nil, force: Bool? = nil) {
         self.command = command
         self.stringArg = stringArg
         self.stringArg2 = stringArg2
         self.floatArg = floatArg
         self.boolArg = boolArg
         self.bandArgs = bandArgs
+        self.force = force
     }
 }
 

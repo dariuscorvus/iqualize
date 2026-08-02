@@ -215,6 +215,13 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     /// runs modally, so `didApply` is settled before this returns.
     @discardableResult
     func applyPreset(id: UUID) -> Bool {
+        (try? applyPreset(id: id, policy: .prompt)) ?? false
+    }
+
+    /// Switch the active preset using an explicit interaction policy. GUI callers use `.prompt`;
+    /// programmatic callers must choose whether dirty state is an error or should be discarded.
+    @discardableResult
+    func applyPreset(id: UUID, policy: PresetSwitchPolicy) throws -> Bool {
         guard presetStore.preset(for: id) != nil else { return false }
         var didApply = false
         let proceed = { [weak self] in
@@ -226,10 +233,20 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
             self.eqWindowController?.syncUIToPreset()
             didApply = true
         }
-        if let eqWindowController {
-            eqWindowController.confirmDiscardIfNeeded(then: proceed)
-        } else {
+
+        switch policy.decision(isDirty: eqWindowController?.hasUnsavedChanges ?? false) {
+        case .fail:
+            throw CLIHandlerError(
+                message: "active preset \"\(audioEngine.activePreset.name)\" has unsaved changes; "
+                    + "save it with `iqualize presets save` or use `--force` to discard them")
+        case .proceed:
             proceed()
+        case .prompt:
+            if let eqWindowController {
+                eqWindowController.confirmDiscardIfNeeded(then: proceed)
+            } else {
+                proceed()
+            }
         }
         return didApply
     }
@@ -652,7 +669,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     /// save") has no CLI analog. Instead this switches back to Flat — the same terminal
     /// state deleteCurrentPreset already falls back to.
     func resetActivePreset() {
-        applyPreset(id: EQPresetData.flat.id)
+        _ = try? applyPreset(id: EQPresetData.flat.id, policy: .discard)
     }
 
     func deletePreset(idOrName: String) throws {
@@ -668,7 +685,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
             presetStore.deleteCustomPreset(id: preset.id)
         }
         if audioEngine.activePreset.id == preset.id {
-            applyPreset(id: EQPresetData.flat.id)
+            _ = try? applyPreset(id: EQPresetData.flat.id, policy: .discard)
         }
     }
 

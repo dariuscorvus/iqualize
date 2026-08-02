@@ -85,6 +85,8 @@ final class EQWindowController: NSWindowController {
 
     /// Guards an external preset switch (menu bar / CLI) behind the same unsaved-changes
     /// confirmation the in-window picker uses.
+    var hasUnsavedChanges: Bool { viewModel.isModified }
+
     func confirmDiscardIfNeeded(then: @escaping () -> Void) {
         viewModel.confirmDiscardIfNeeded(then: then)
     }

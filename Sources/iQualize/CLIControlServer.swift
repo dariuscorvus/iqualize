@@ -5,6 +5,29 @@ import os.log
 
 private let cliLog = OSLog(subsystem: "com.iqualize", category: "cli")
 
+enum PresetSwitchPolicy {
+    case prompt
+    case failIfDirty
+    case discard
+
+    func decision(isDirty: Bool) -> PresetSwitchDecision {
+        switch self {
+        case .prompt:
+            return isDirty ? .prompt : .proceed
+        case .failIfDirty:
+            return isDirty ? .fail : .proceed
+        case .discard:
+            return .proceed
+        }
+    }
+}
+
+enum PresetSwitchDecision: Equatable {
+    case proceed
+    case prompt
+    case fail
+}
+
 /// Methods the CLI control channel can invoke, implemented by `MenuBarController`. All
 /// isolated to the main actor since they touch `AudioEngine`/`PresetStore`/window state.
 @available(macOS 14.2, *)
@@ -13,7 +36,7 @@ protocol CLICommandHandling: AnyObject {
     func statusSnapshot() -> CLIStatusPayload
     func listPresetSummaries() -> [CLIPresetSummary]
     func resolvePreset(idOrName: String) -> EQPresetData?
-    @discardableResult func applyPreset(id: UUID) -> Bool
+    @discardableResult func applyPreset(id: UUID, policy: PresetSwitchPolicy) throws -> Bool
     func setBypassed(_ bypassed: Bool)
     @discardableResult func toggleBypassed() -> Bool
     func setInputGain(_ db: Float)
@@ -253,8 +276,17 @@ final class CLIControlServer: @unchecked Sendable {
             guard let preset = handler.resolvePreset(idOrName: name) else {
                 return .failure("no preset named '\(name)'")
             }
-            handler.applyPreset(id: preset.id)
-            return .success(status: handler.statusSnapshot())
+            let policy: PresetSwitchPolicy = request.force == true ? .discard : .failIfDirty
+            do {
+                guard try handler.applyPreset(id: preset.id, policy: policy) else {
+                    return .failure("preset switch was cancelled")
+                }
+                return .success(status: handler.statusSnapshot())
+            } catch let error as CLIHandlerError {
+                return .failure(error.message)
+            } catch {
+                return .failure(error.localizedDescription)
+            }
 
         case CLICommand.setBypass:
             guard let value = request.boolArg else { return .failure("missing bypass value") }
