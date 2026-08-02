@@ -2,6 +2,23 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.57.5] - 2026-08-01
+
+### Added
+- Automatic recovery after sleep/wake and unexpected capture-helper termination, with bounded backoff, output-device readiness polling, and a terminal failure after repeated helper crashes (#171, #172).
+
+### Changed
+- Audio lifecycle requests now run through a dedicated Swift actor with explicit states, separate persisted user intent, serialized transitions, and a bounded in-memory transition history (#170).
+- The first Developer ID builds now use `codes.darius.iqualize` for the app bundle identifier and `codes.darius.iqualize.capture` for the helper signing identifier, matching the `darius.codes` domain before users grant TCC permissions to the signed app. This changes the macOS identity from earlier ad-hoc builds: System Audio Recording permission must be granted again, and existing UserDefaults-backed data may not carry over automatically, so saved presets, favorites, hidden built-ins, pinned preset, OPRA cache state, and settings can appear reset.
+- CLI capture enable/disable commands now await the lifecycle transition before returning status.
+- Capture status reports unexpected helper restarts since app launch.
+
+### Fixed
+- Partial audio startup and normal shutdown now share idempotent teardown, remove analyzer taps only when installed, clear all graph references, and preserve the original startup error (#153).
+- A wedged capture helper handshake now fails after a 10-second deadline, terminates the helper, and releases partial resources instead of blocking the app indefinitely (#169).
+- Turning capture on no longer reapplies a pinned output-device preset when the default output device did not actually change.
+- Developer ID installs now re-sign an unchanged capture helper so it does not stay ad-hoc inside a signed app bundle.
+
 ## [0.57.4] - 2026-08-01
 
 ### Fixed

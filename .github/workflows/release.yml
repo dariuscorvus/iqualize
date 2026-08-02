@@ -27,10 +27,10 @@ jobs:
     permissions:
       contents: write
     # The secrets context is not available in step `if` conditions;
-    # these flags carry the presence check instead.
+    # these flags carry the complete presence checks instead.
     env:
-      HAS_SIGNING_CREDENTIALS: ${{ secrets.APPLE_CERTIFICATE != '' }}
-      HAS_NOTARY_CREDENTIALS: ${{ secrets.APPLE_ID != '' }}
+      HAS_SIGNING_CREDENTIALS: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
+      HAS_NOTARY_CREDENTIALS: ${{ secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -40,10 +40,19 @@ jobs:
         if: github.event_name == 'push'
         run: |
           version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Sources/iQualize/Info.plist)
-          test "v$version" = "${GITHUB_REF_NAME}" || {
-            echo "Tag ${GITHUB_REF_NAME} does not match Info.plist version $version" >&2
-            exit 1
-          }
+          case "${GITHUB_REF_NAME}" in
+            "v$version")
+              echo "IS_PRERELEASE=false" >> "$GITHUB_ENV"
+              ;;
+            "v$version-prerelease")
+              echo "IS_PRERELEASE=true" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "Tag ${GITHUB_REF_NAME} does not match Info.plist version $version" >&2
+              echo "Expected v$version or v$version-prerelease" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Run tests
         run: swift test
@@ -74,10 +83,20 @@ jobs:
       - name: Notarize when configured
         if: env.HAS_NOTARY_CREDENTIALS == 'true'
         run: |
-          xcrun notarytool submit iQualize-*.dmg --wait \
+          xcrun notarytool submit iQualize-*.dmg --wait --output-format json \
             --apple-id "${{ secrets.APPLE_ID }}" \
             --password "${{ secrets.APPLE_PASSWORD }}" \
-            --team-id "${{ secrets.APPLE_TEAM_ID }}"
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            | tee /tmp/notary-submit.json
+          submission_id=$(python3 -c 'import json; print(json.load(open("/tmp/notary-submit.json"))["id"])')
+          status=$(python3 -c 'import json; print(json.load(open("/tmp/notary-submit.json"))["status"])')
+          if [ "$status" != "Accepted" ]; then
+            xcrun notarytool log "$submission_id" --output-format json \
+              --apple-id "${{ secrets.APPLE_ID }}" \
+              --password "${{ secrets.APPLE_PASSWORD }}" \
+              --team-id "${{ secrets.APPLE_TEAM_ID }}"
+            exit 1
+          fi
           xcrun stapler staple iQualize-*.dmg
 
       - name: Upload DMG artifact (dry run)
@@ -108,10 +127,15 @@ jobs:
           else
             install_note=.github/release-notes/install-unsigned.md
           fi
+          prerelease_args=()
+          if [ "${IS_PRERELEASE:-false}" = "true" ]; then
+            prerelease_args+=(--prerelease)
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             --title "$(cat /tmp/title.txt)" \
             --notes "$(cat /tmp/highlights.md "$install_note" /tmp/thanks.md)" \
             --generate-notes \
+            "${prerelease_args[@]}" \
             iQualize-*.dmg
         env:
           GH_TOKEN: ${{ github.token }}

@@ -81,7 +81,7 @@ final class OPRACatalog {
 
     private static func cacheFileURL() -> URL {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.iqualize.app", isDirectory: true)
+        let dir = base.appendingPathComponent(Bundle.main.bundleIdentifier ?? "codes.darius.iqualize", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("opra_database_v1.jsonl")
     }

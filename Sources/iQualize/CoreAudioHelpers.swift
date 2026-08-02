@@ -23,6 +23,31 @@ func getDefaultOutputDeviceID() throws -> AudioDeviceID {
     return deviceID
 }
 
+/// Returns whether Core Audio currently reports the device as alive. This is
+/// the same readiness signal used by the capture helper while its aggregate
+/// device comes online.
+func isAudioDeviceAlive(_ deviceID: AudioDeviceID) -> Bool {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyDeviceIsAlive,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var alive: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    let status = AudioObjectGetPropertyData(
+        deviceID, &address, 0, nil, &size, &alive
+    )
+    return status == noErr && alive != 0
+}
+
+/// Readiness check used by wake recovery. It deliberately does not introduce
+/// another fixed delay. The lifecycle coordinator polls this condition with a
+/// bounded deadline and starts only after the default output is alive.
+func isDefaultOutputDeviceReady() -> Bool {
+    guard let deviceID = try? getDefaultOutputDeviceID() else { return false }
+    return isAudioDeviceAlive(deviceID)
+}
+
 // CoreAudio returns a +1 CFString for the UID/name selectors. Reading it into a
 // `var uid: CFString` and passing `&uid` forms a raw pointer to a variable that
 // holds an object reference — the compiler warns, and it leaks the retain.

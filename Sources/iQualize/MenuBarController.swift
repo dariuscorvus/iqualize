@@ -58,7 +58,10 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
             audioEngine.inputGainDB = state.inputGainDB
             audioEngine.outputGainDB = state.outputGainDB
         }
-        audioEngine.setEnabled(state.captureEnabled)
+        let captureEnabled = state.captureEnabled
+        Task { @MainActor in
+            await audioEngine.setEnabled(captureEnabled)
+        }
         updateIcon()
 
         // Restore EQ window if it was open when the app last quit
@@ -446,8 +449,8 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
         return newValue
     }
 
-    func setCapture(_ enabled: Bool) {
-        audioEngine.setEnabled(enabled)
+    func setCapture(_ enabled: Bool) async {
+        await audioEngine.setEnabled(enabled)
         var s = iQualizeState.load()
         s.captureEnabled = enabled
         s.save()
@@ -455,9 +458,9 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     }
 
     @discardableResult
-    func toggleCapture() -> Bool {
-        let newValue = !audioEngine.isRunning
-        setCapture(newValue)
+    func toggleCapture() async -> Bool {
+        let newValue = !audioEngine.userEnabled
+        await setCapture(newValue)
         return newValue
     }
 
@@ -942,7 +945,8 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
             captureFillFrames: capture?.fillFrames,
             captureDriftPpm: capture?.driftPpm,
             captureUnderruns: capture?.underruns,
-            captureOverrunResyncs: capture?.overrunResyncs
+            captureOverrunResyncs: capture?.overrunResyncs,
+            captureHelperRestarts: audioEngine.captureHelperRestartCount
         )
     }
 
@@ -990,7 +994,6 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     }
 
     @objc private func quit(_ sender: NSMenuItem) {
-        audioEngine.stop()
         (NSApp.delegate as? AppDelegate)?.isRealQuit = true
         NSApp.terminate(nil)
     }

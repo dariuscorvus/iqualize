@@ -160,8 +160,11 @@ public struct CLIStatusPayload: Codable, Sendable {
     public var captureDriftPpm: Double?
     public var captureUnderruns: UInt64?
     public var captureOverrunResyncs: UInt64?
+    /// Unexpected capture-helper terminations since the app launched.
+    /// Optional so older apps and newer CLIs remain forward-compatible.
+    public var captureHelperRestarts: UInt64?
 
-    public init(bypassed: Bool, activePresetID: UUID, activePresetName: String, inputGainDB: Float, outputGainDB: Float, balance: Float, gainIsGlobal: Bool, outputDeviceName: String, isRunning: Bool, peakLimiter: Bool, preEqSpectrumEnabled: Bool, postEqSpectrumEnabled: Bool, appVersion: String? = nil, gitCommit: String? = nil, captureFillFrames: Int? = nil, captureDriftPpm: Double? = nil, captureUnderruns: UInt64? = nil, captureOverrunResyncs: UInt64? = nil) {
+    public init(bypassed: Bool, activePresetID: UUID, activePresetName: String, inputGainDB: Float, outputGainDB: Float, balance: Float, gainIsGlobal: Bool, outputDeviceName: String, isRunning: Bool, peakLimiter: Bool, preEqSpectrumEnabled: Bool, postEqSpectrumEnabled: Bool, appVersion: String? = nil, gitCommit: String? = nil, captureFillFrames: Int? = nil, captureDriftPpm: Double? = nil, captureUnderruns: UInt64? = nil, captureOverrunResyncs: UInt64? = nil, captureHelperRestarts: UInt64? = nil) {
         self.bypassed = bypassed
         self.activePresetID = activePresetID
         self.activePresetName = activePresetName
@@ -180,6 +183,7 @@ public struct CLIStatusPayload: Codable, Sendable {
         self.captureDriftPpm = captureDriftPpm
         self.captureUnderruns = captureUnderruns
         self.captureOverrunResyncs = captureOverrunResyncs
+        self.captureHelperRestarts = captureHelperRestarts
     }
 }
 

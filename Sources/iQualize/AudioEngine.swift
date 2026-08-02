@@ -14,6 +14,11 @@ func captureHelperURL() -> URL {
     Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/iQualizeCapture")
 }
 
+func defaultOutputDeviceChanged(previousUID: String?, currentUID: String?) -> Bool {
+    guard let currentUID else { return false }
+    return currentUID != previousUID
+}
+
 // MARK: - Real-time Audio Callbacks (free functions, no actor isolation)
 // These run on Core Audio's IO thread. They MUST be free functions — not closures
 // defined inside a @MainActor class — because Swift 6 strict concurrency inserts
@@ -125,9 +130,15 @@ final class AudioEngine {
     private static let avEQNativeBandCount = 31
 
     private(set) var isRunning = false
+    private(set) var lifecycleState: AudioLifecycleState = .inactive
+    private(set) var userEnabled = false
+    private(set) var lifecycleHistory: [AudioLifecycleTransition] = []
     private(set) var outputDeviceName = "Unknown"
     private(set) var outputDeviceUID: String?
     private(set) var error: String?
+    /// Unexpected helper terminations since the app launched. This is kept
+    /// outside CaptureClient because a recovery creates a fresh client.
+    private(set) var captureHelperRestartCount: UInt64 = 0
 
     // Capture lives in a separate helper process (see CaptureClient.swift +
     // Sources/iQualizeCapture/main.swift). This main process owns no CATap,
@@ -144,6 +155,8 @@ final class AudioEngine {
     nonisolated(unsafe) private var deviceChangeListenerBlock: AudioObjectPropertyListenerBlock?
     @ObservationIgnored
     private var configChangeObserver: NSObjectProtocol?
+    @ObservationIgnored
+    private var lifecycleCoordinator: AudioLifecycleCoordinator?
     var onStateChange: (() -> Void)?
     /// Resolves a pinned preset for a device UID, if any. Wired by the caller that owns
     /// both AudioEngine and PresetStore — kept as a closure so AudioEngine stays decoupled
@@ -154,6 +167,8 @@ final class AudioEngine {
     let preEqAnalyzer = SpectrumAnalyzer()
     let postEqAnalyzer = SpectrumAnalyzer()
     private var sourceNode: AVAudioSourceNode?
+    private var sourceTapInstalled = false
+    private var eqTapInstalled = false
 
     var activePreset: EQPresetData = .flat {
         didSet {
@@ -232,6 +247,31 @@ final class AudioEngine {
             outputDeviceName = "Unknown"
         }
         installDeviceChangeListener()
+
+        lifecycleCoordinator = AudioLifecycleCoordinator(
+            startOperation: { @MainActor [weak self] in
+                guard let self else {
+                    throw NSError(domain: "iQualize", code: -200,
+                                  userInfo: [NSLocalizedDescriptionKey: "Audio engine is unavailable"])
+                }
+                try self.startGraph()
+            },
+            stopOperation: { @MainActor [weak self] in
+                self?.teardown()
+            },
+            readiness: { @MainActor in
+                isDefaultOutputDeviceReady()
+            },
+            publishSnapshot: { @MainActor [weak self] snapshot in
+                self?.applyLifecycleSnapshot(snapshot)
+            },
+            publishError: { @MainActor [weak self] message in
+                if let message {
+                    os_log(.error, log: appLog, "audio lifecycle failure: %{public}@", message)
+                }
+                self?.error = message
+            }
+        )
     }
 
     deinit {
@@ -250,8 +290,7 @@ final class AudioEngine {
 
     // MARK: - Start / Stop
 
-    func start() throws {
-        guard !isRunning else { return }
+    private func startGraph() throws {
         error = nil
 
         let outputDeviceID = try getDefaultOutputDeviceID()
@@ -266,9 +305,12 @@ final class AudioEngine {
         let client = CaptureClient()
         client.onUnexpectedTermination = { [weak self] in
             guard let self else { return }
-            self.error = "Capture helper terminated unexpectedly."
-            self.stop()
-            self.onStateChange?()
+            self.captureHelperRestartCount &+= 1
+            Task { @MainActor in
+                guard let lifecycleCoordinator = self.lifecycleCoordinator else { return }
+                await lifecycleCoordinator.helperTerminated()
+                self.applyLifecycleSnapshot(await lifecycleCoordinator.snapshot())
+            }
         }
         try client.start(helperURL: captureHelperURL())
         self.captureClient = client
@@ -352,15 +394,17 @@ final class AudioEngine {
         // on multi-channel output devices (#107) — multiply the loss back in
         // at the source node, ahead of the EQ and limiter so the limiter still
         // guards the restored level. Recomputed on every start(); device
-        // switches funnel through restartTap() -> stop() + start().
+        // switches funnel through the lifecycle coordinator's stop + start path.
         let outputChannels = Int(avEngine.outputNode.outputFormat(forBus: 0).channelCount)
         rtVolumeCompensation = GainPolicy.tapHeadroomCompensation(outputChannels: outputChannels)
         os_log(.default, log: appLog,
                "output hw channels: %{public}d  tap headroom compensation: x%{public}.1f",
                outputChannels, rtVolumeCompensation)
 
-        try avEngine.start()
+        // Retain the graph before starting it so a thrown start() can still be
+        // stopped by the shared teardown path.
         self.engine = avEngine
+        try avEngine.start()
 
         // Subscribe to engine configuration changes. AVAudioEngine fires this
         // when the underlying output device's I/O setup changes — including
@@ -377,8 +421,11 @@ final class AudioEngine {
                 guard let self else { return }
                 os_log(.default, log: appLog,
                        "AVAudioEngineConfigurationChange — restarting")
-                self.restartTap()
-                self.onStateChange?()
+                Task { @MainActor in
+                    guard let lifecycleCoordinator = self.lifecycleCoordinator else { return }
+                    await lifecycleCoordinator.configurationChanged()
+                    self.applyLifecycleSnapshot(await lifecycleCoordinator.snapshot())
+                }
             }
         }
 
@@ -390,16 +437,60 @@ final class AudioEngine {
         sourceNode.installTap(onBus: 0, bufferSize: 2048, format: format) { @Sendable buffer, _ in
             preAnalyzer.process(buffer, sampleRate: capturedSampleRate)
         }
+        sourceTapInstalled = true
         let postAnalyzer: SpectrumAnalyzer = self.postEqAnalyzer
         eqNode.installTap(onBus: 0, bufferSize: 2048, format: format) { @Sendable buffer, _ in
             postAnalyzer.process(buffer, sampleRate: capturedSampleRate)
         }
+        eqTapInstalled = true
 
-        isRunning = true
     }
 
-    func stop() {
-        guard isRunning else { return }
+    /// Changes the user's capture intent. The coordinator serializes this
+    /// request with device, configuration, sleep, and helper events.
+    func setEnabled(_ enabled: Bool) async {
+        guard let lifecycleCoordinator else { return }
+        await lifecycleCoordinator.setUserEnabled(enabled)
+        applyLifecycleSnapshot(await lifecycleCoordinator.snapshot())
+    }
+
+    func handleSleep() async {
+        guard let lifecycleCoordinator else { return }
+        await lifecycleCoordinator.sleep()
+        applyLifecycleSnapshot(await lifecycleCoordinator.snapshot())
+    }
+
+    func handleWake() async {
+        guard let lifecycleCoordinator else { return }
+        await lifecycleCoordinator.wake()
+        applyLifecycleSnapshot(await lifecycleCoordinator.snapshot())
+    }
+
+    func shutdown() async {
+        guard let lifecycleCoordinator else { return }
+        await lifecycleCoordinator.shutdown()
+        applyLifecycleSnapshot(await lifecycleCoordinator.snapshot())
+    }
+
+    func requestShutdown() {
+        Task { @MainActor [weak self] in
+            await self?.shutdown()
+        }
+    }
+
+    private func applyLifecycleSnapshot(_ snapshot: AudioLifecycleSnapshot) {
+        lifecycleState = snapshot.state
+        userEnabled = snapshot.userEnabled
+        lifecycleHistory = snapshot.history
+        isRunning = snapshot.state == .running
+        onStateChange?()
+    }
+
+    /// Releases every resource acquired by start(), including resources from a
+    /// start that failed before isRunning became true. Tap removal is guarded by
+    /// explicit installation state because AVAudioNode raises an Objective-C
+    /// exception when removeTap(onBus:) is called on an empty bus.
+    private func teardown() {
         isRunning = false
 
         if let configChangeObserver {
@@ -414,13 +505,20 @@ final class AudioEngine {
         rtVolumeCompensation = 1.0
 
         // Remove spectrum taps before stopping engine
-        sourceNode?.removeTap(onBus: 0)
-        eq?.removeTap(onBus: 0)
+        if sourceTapInstalled {
+            sourceNode?.removeTap(onBus: 0)
+            sourceTapInstalled = false
+        }
+        if eqTapInstalled {
+            eq?.removeTap(onBus: 0)
+            eqTapInstalled = false
+        }
         sourceNode = nil
 
         engine?.stop()
         engine = nil
         eq = nil
+        outputGainEQ = nil
         limiter = nil
 
         // Terminate the capture helper. It cleans up its own CATap, aggregate,
@@ -430,44 +528,6 @@ final class AudioEngine {
     }
 
     // MARK: - EQ Control
-
-    func setEnabled(_ enabled: Bool) {
-        if enabled {
-            do {
-                try start()
-            } catch {
-                os_log(.error, log: appLog, "start() failed: %{public}@", error.localizedDescription)
-                self.error = error.localizedDescription
-                cleanupPartialStart()
-            }
-        } else {
-            stop()
-        }
-    }
-
-    /// Tear down anything that may have been partially initialised by a
-    /// failed start(). Mirrors stop()'s cleanup but doesn't gate on
-    /// isRunning (start() throws before isRunning is set).
-    private func cleanupPartialStart() {
-        if let configChangeObserver {
-            NotificationCenter.default.removeObserver(configChangeObserver)
-            self.configChangeObserver = nil
-        }
-        rtCaptureClient = nil
-        rtBiquadChainL = nil
-        rtBiquadChainR = nil
-        rtBiquadChainActive = false
-        rtVolumeCompensation = 1.0
-        sourceNode?.removeTap(onBus: 0)
-        eq?.removeTap(onBus: 0)
-        sourceNode = nil
-        engine?.stop()
-        engine = nil
-        eq = nil
-        limiter = nil
-        captureClient?.stop()
-        captureClient = nil
-    }
 
     /// A muted band's gain for DSP purposes is always 0, regardless of its stored `.gain` —
     /// the stored value is preserved so muting is non-destructive (needed for CLI mute,
@@ -585,18 +645,17 @@ final class AudioEngine {
         )
     }
 
-    private var isRestarting = false
-
     private func handleDeviceChange() {
-        guard !isRestarting else { return }
-
+        var outputDeviceChanged = false
         if let deviceID = try? getDefaultOutputDeviceID() {
+            let previousUID = outputDeviceUID
             if let name = try? getDeviceName(deviceID) {
                 outputDeviceName = name
             }
             let uid = try? getDeviceUID(deviceID)
             outputDeviceUID = uid
-            if let uid, let pinned = pinnedPresetProvider?(uid) {
+            outputDeviceChanged = defaultOutputDeviceChanged(previousUID: previousUID, currentUID: uid)
+            if outputDeviceChanged, let uid, let pinned = pinnedPresetProvider?(uid) {
                 activePreset = pinned
                 var s = iQualizeState.load()
                 s.selectedPresetID = pinned.id
@@ -604,29 +663,23 @@ final class AudioEngine {
             }
         }
 
-        restartTap()
-        onStateChange?()
-    }
-
-    /// Stops and restarts the tap/aggregate device in place, guarded against reentrancy
-    /// from listener callbacks the restart itself can trigger (tearing down the aggregate
-    /// device fires a default-output-device notification).
-    private func restartTap() {
-        guard isRunning, !isRestarting else { return }
-        isRestarting = true
-        stop()
-        do {
-            try start()
-        } catch {
-            self.error = error.localizedDescription
+        guard outputDeviceChanged else {
+            onStateChange?()
+            return
         }
-        isRestarting = false
+
+        Task { @MainActor in
+            guard let lifecycleCoordinator = self.lifecycleCoordinator else { return }
+            await lifecycleCoordinator.deviceChanged()
+            self.applyLifecycleSnapshot(await lifecycleCoordinator.snapshot())
+        }
+        onStateChange?()
     }
 
     // MARK: - New-process tap coverage
     //
     // Used to live here: a 2 s poll of kAudioHardwarePropertyProcessObjectList that
-    // called restartTap() whenever the list grew, so a late-launched app that the tap
+    // called the old restart path whenever the list grew, so a late-launched app that the tap
     // had silently dropped (#87) would get picked up. It worked, but the restart is a
     // full stop() + start() — helper, tap, aggregate, ring and AVAudioEngine graph all
     // torn down — and spliced ~100 ms of silence into playback every time any app
