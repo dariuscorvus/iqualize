@@ -2,6 +2,15 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.58.0] - 2026-08-02
+
+### Changed
+- Real-time audio configuration now publishes complete immutable snapshots with sequentially consistent reader protection and off-render reclamation, so callbacks observe an old or new configuration rather than a mixed one (#164, #173).
+- Live biquad edits reuse filter state and ramp coefficients over 64 frames. Preset switches publish zeroed filter state while retaining the same ramp, and explicit reset publishes a fresh zero-state snapshot (#174).
+
+### Fixed
+- Removed render-thread scratch-buffer growth and the spectrum analyzer's per-channel scale-array allocation. Oversized render slices now produce silence instead of allocating, while unlimited band counts remain supported (#152).
+
 ## [0.57.5] - 2026-08-01
 
 ### Added
