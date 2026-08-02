@@ -32,32 +32,43 @@ static inline void iq_store_relaxed_u64(uint64_t *p, uint64_t v) {
     __atomic_store_n(p, v, __ATOMIC_RELAXED);
 }
 
-// Render-thread snapshot publication primitives. A publisher initializes a
-// complete snapshot, exchanges it with acq_rel ordering, then waits for the
-// reader count to reach zero before reclaiming the old snapshot. A reader must
-// increment readers with acq_rel ordering before loading current with acquire
-// ordering, and decrement with release ordering after it stops dereferencing
-// the snapshot. This ordering closes the race where a callback starts while a
-// publisher is retiring the previous pointer: callbacks that can still see the
-// old pointer are counted before the publisher observes quiescence.
-static inline void *iq_load_acquire_ptr(void * const *p) {
-    return __atomic_load_n(p, __ATOMIC_ACQUIRE);
+// Render-thread snapshot publication primitives. The reader-count protocol
+// uses one sequentially consistent order for the reader increment, pointer
+// load, publisher exchange, and quiescence load:
+//
+//   reader:    increment readers; load current; ...; decrement readers
+//   publisher: exchange current; load readers; reclaim only when zero
+//
+// If the reader loads the retired pointer, its increment is ordered before the
+// publisher's quiescence load. If its increment is ordered after that load,
+// its pointer load is ordered after the exchange and it sees the replacement.
+// Acquire/release alone does not establish that total order on arm64.
+static inline void *iq_load_snapshot_ptr(void * const *p) {
+    return __atomic_load_n(p, __ATOMIC_SEQ_CST);
 }
 
-static inline void *iq_exchange_acq_rel_ptr(void **p, void *v) {
-    return __atomic_exchange_n(p, v, __ATOMIC_ACQ_REL);
+static inline void *iq_exchange_snapshot_ptr(void **p, void *v) {
+    return __atomic_exchange_n(p, v, __ATOMIC_SEQ_CST);
 }
 
-static inline uint32_t iq_load_acquire_u32(const uint32_t *p) {
-    return __atomic_load_n(p, __ATOMIC_ACQUIRE);
+static inline uint32_t iq_load_snapshot_readers(const uint32_t *p) {
+    return __atomic_load_n(p, __ATOMIC_SEQ_CST);
 }
 
-static inline uint32_t iq_fetch_add_acq_rel_u32(uint32_t *p, uint32_t v) {
-    return __atomic_fetch_add(p, v, __ATOMIC_ACQ_REL);
+static inline uint32_t iq_enter_snapshot_reader(uint32_t *p) {
+    return __atomic_fetch_add(p, 1, __ATOMIC_SEQ_CST);
 }
 
-static inline uint32_t iq_fetch_sub_release_u32(uint32_t *p, uint32_t v) {
-    return __atomic_fetch_sub(p, v, __ATOMIC_RELEASE);
+static inline uint32_t iq_leave_snapshot_reader(uint32_t *p) {
+    return __atomic_fetch_sub(p, 1, __ATOMIC_SEQ_CST);
+}
+
+static inline uint32_t iq_load_snapshot_u32(const uint32_t *p) {
+    return __atomic_load_n(p, __ATOMIC_SEQ_CST);
+}
+
+static inline void iq_store_snapshot_u32(uint32_t *p, uint32_t v) {
+    __atomic_store_n(p, v, __ATOMIC_SEQ_CST);
 }
 
 #endif /* IQ_RING_ATOMICS_H */

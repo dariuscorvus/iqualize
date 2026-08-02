@@ -30,10 +30,10 @@ nonisolated(unsafe) private var rtScratchBuffer: UnsafeMutablePointer<Float>?
 nonisolated(unsafe) private var rtScratchCapacity: Int = 0
 
 /// Complete immutable configuration acquired by the render callback. The
-/// snapshot contains only raw pointers and scalar values, so acquiring it does
-/// not retain a CaptureClient or BiquadFilterChain. The owning main-actor
-/// properties remain alive until the publication quiescence protocol retires
-/// this snapshot.
+/// callback-visible fields are raw pointers and scalars, so acquiring them does
+/// not retain a CaptureClient or BiquadFilterChain. The private owner fields
+/// retain those objects off the callback path until the publication quiescence
+/// protocol retires this snapshot.
 struct RenderConfiguration: @unchecked Sendable {
     let captureClient: UnsafeMutableRawPointer?
     let channelCount: UInt32
@@ -168,7 +168,7 @@ func publishRenderConfigurationForTesting(_ configuration: RenderConfiguration?)
 @discardableResult
 func reclaimQuiescentRenderConfigurationsForTesting() -> Int {
     let readers = withUnsafePointer(to: &rtRenderPublication.pointee.readers) { pointer in
-        iq_load_acquire_u32(pointer)
+        iq_load_snapshot_readers(pointer)
     }
     guard readers == 0 else { return retiredRenderConfigurations.count }
     let retired = retiredRenderConfigurations
@@ -775,15 +775,31 @@ final class AudioEngine {
         }
     }
 
-    /// Build replacement chains off the render thread. The callback sees them only
-    /// after the complete snapshot is atomically published.
-    private func updateBiquadChains(leftBands: [EQBand], rightBands: [EQBand], sampleRate: Double) {
-        renderBiquadChainL = BiquadFilterChain(bands: leftBands, sampleRate: sampleRate)
-        renderBiquadChainR = BiquadFilterChain(bands: rightBands, sampleRate: sampleRate)
+    /// Build or update chains off the render thread. Reusing a chain preserves
+    /// delay state and lets its immutable snapshots ramp coefficients during
+    /// live edits. A changed preset identity requests the documented zero-state
+    /// reset while still using the same coefficient ramp.
+    private func updateBiquadChains(
+        leftBands: [EQBand],
+        rightBands: [EQBand],
+        sampleRate: Double,
+        resetState: Bool = false
+    ) {
+        if let chain = renderBiquadChainL {
+            chain.updateCoefficients(bands: leftBands, sampleRate: sampleRate, resetState: resetState)
+        } else {
+            renderBiquadChainL = BiquadFilterChain(bands: leftBands, sampleRate: sampleRate)
+        }
+        if let chain = renderBiquadChainR {
+            chain.updateCoefficients(bands: rightBands, sampleRate: sampleRate, resetState: resetState)
+        } else {
+            renderBiquadChainR = BiquadFilterChain(bands: rightBands, sampleRate: sampleRate)
+        }
     }
 
     private func applyBands(from old: EQPresetData? = nil) {
         guard let eq else { return }
+        let resetState = old.map { $0.id != activePreset.id } ?? false
 
         if splitChannelActive && !bypassed {
             // Split channel mode: bypass AVAudioUnitEQ, use custom biquad chains
@@ -791,7 +807,12 @@ final class AudioEngine {
             eq.bypass = true
             let leftBands = withEffectiveGain(activePreset.bands)
             let rightBands = withEffectiveGain(activePreset.rightBands ?? activePreset.bands)
-            updateBiquadChains(leftBands: leftBands, rightBands: rightBands, sampleRate: outputSampleRate)
+            updateBiquadChains(
+                leftBands: leftBands,
+                rightBands: rightBands,
+                sampleRate: outputSampleRate,
+                resetState: resetState
+            )
             publishRenderConfiguration()
         } else {
             // Linked mode: AVAudioUnitEQ natively processes the first
@@ -832,7 +853,12 @@ final class AudioEngine {
 
             if allBands.count > Self.avEQNativeBandCount {
                 let overflowBands = withEffectiveGain(Array(allBands[Self.avEQNativeBandCount...]))
-                updateBiquadChains(leftBands: overflowBands, rightBands: overflowBands, sampleRate: outputSampleRate)
+                updateBiquadChains(
+                    leftBands: overflowBands,
+                    rightBands: overflowBands,
+                    sampleRate: outputSampleRate,
+                    resetState: resetState
+                )
             } else {
                 renderBiquadChainL = nil
                 renderBiquadChainR = nil

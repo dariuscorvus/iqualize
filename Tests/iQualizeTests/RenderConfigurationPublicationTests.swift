@@ -25,7 +25,7 @@ final class RenderConfigurationPublicationTests: XCTestCase {
         (0..<count).map { band(Float(40 + $0 * 90)) }
     }
 
-    private func bandCount(_ pointer: UnsafeMutableRawPointer?) -> Int {
+    private static func bandCount(_ pointer: UnsafeMutableRawPointer?) -> Int {
         guard let pointer else { return -1 }
         return Unmanaged<BiquadFilterChain>.fromOpaque(pointer)
             .takeUnretainedValue()
@@ -63,23 +63,23 @@ final class RenderConfigurationPublicationTests: XCTestCase {
 
         let held = acquireRenderConfigurationForTesting()
         XCTAssertEqual(held.configurationForTesting?.inputGain, 0.5)
-        XCTAssertEqual(bandCount(held.configurationForTesting?.biquadChainL), 1)
-        XCTAssertEqual(bandCount(held.configurationForTesting?.biquadChainR), 4)
+        XCTAssertEqual(Self.bandCount(held.configurationForTesting?.biquadChainL), 1)
+        XCTAssertEqual(Self.bandCount(held.configurationForTesting?.biquadChainR), 4)
 
         let new = configuration(leftCount: 40, rightCount: 2, inputGain: 2)
         XCTAssertEqual(publishRenderConfigurationForTesting(new), 1, "old snapshot must be retired, not reclaimed, while a reader holds it")
 
         XCTAssertEqual(held.configurationForTesting?.inputGain, 0.5)
-        XCTAssertEqual(bandCount(held.configurationForTesting?.biquadChainL), 1)
-        XCTAssertEqual(bandCount(held.configurationForTesting?.biquadChainR), 4)
+        XCTAssertEqual(Self.bandCount(held.configurationForTesting?.biquadChainL), 1)
+        XCTAssertEqual(Self.bandCount(held.configurationForTesting?.biquadChainR), 4)
         held.releaseRead()
 
         XCTAssertEqual(reclaimQuiescentRenderConfigurationsForTesting(), 0)
         let latest = acquireRenderConfigurationForTesting()
         defer { latest.releaseRead() }
         XCTAssertEqual(latest.configurationForTesting?.inputGain, 2)
-        XCTAssertEqual(bandCount(latest.configurationForTesting?.biquadChainL), 40)
-        XCTAssertEqual(bandCount(latest.configurationForTesting?.biquadChainR), 2)
+        XCTAssertEqual(Self.bandCount(latest.configurationForTesting?.biquadChainL), 40)
+        XCTAssertEqual(Self.bandCount(latest.configurationForTesting?.biquadChainR), 2)
     }
 
     func testPublishedConfigurationDoesNotExposeMixedGainAndChainState() {
@@ -94,8 +94,8 @@ final class RenderConfigurationPublicationTests: XCTestCase {
             let snapshot = handle.configurationForTesting
             let observed = (
                 snapshot?.inputGain ?? -1,
-                bandCount(snapshot?.biquadChainL),
-                bandCount(snapshot?.biquadChainR)
+                Self.bandCount(snapshot?.biquadChainL),
+                Self.bandCount(snapshot?.biquadChainR)
             )
             handle.releaseRead()
             XCTAssertTrue(
@@ -103,6 +103,65 @@ final class RenderConfigurationPublicationTests: XCTestCase {
                 "observed mixed state: \(observed)"
             )
         }
+    }
+
+    func testConcurrentReaderSeesOnlyCompletePublishedConfigurations() {
+        let first = configuration(leftCount: 2, rightCount: 5, inputGain: 0.25)
+        let second = configuration(leftCount: 48, rightCount: 3, inputGain: 1.75)
+        let expected: [(Float, Int, Int)] = [
+            (0.25, 2, 5),
+            (1.75, 48, 3)
+        ]
+        XCTAssertEqual(publishRenderConfigurationForTesting(first), 0)
+
+        let queue = DispatchQueue(label: "iqualize.m3.outer-publication", attributes: .concurrent)
+        let group = DispatchGroup()
+        let failure = FailureBox()
+
+        group.enter()
+        queue.async {
+            for iteration in 0..<1_000 {
+                _ = publishRenderConfigurationForTesting(iteration.isMultiple(of: 2) ? first : second)
+            }
+            group.leave()
+        }
+
+        group.enter()
+        queue.async {
+            for _ in 0..<10_000 {
+                let handle = acquireRenderConfigurationForTesting()
+                guard let snapshot = handle.configurationForTesting else {
+                    handle.releaseRead()
+                    failure.lock.lock()
+                    failure.value = true
+                    failure.lock.unlock()
+                    continue
+                }
+
+                let observed = (
+                    snapshot.inputGain,
+                    Self.bandCount(snapshot.biquadChainL),
+                    Self.bandCount(snapshot.biquadChainR)
+                )
+                handle.releaseRead()
+
+                if !expected.contains(where: {
+                    $0.0 == observed.0 && $0.1 == observed.1 && $0.2 == observed.2
+                }) {
+                    failure.lock.lock()
+                    failure.value = true
+                    failure.lock.unlock()
+                    break
+                }
+            }
+            group.leave()
+        }
+
+        group.wait()
+        failure.lock.lock()
+        let failed = failure.value
+        failure.lock.unlock()
+        XCTAssertFalse(failed)
     }
 
     func testRetirementWaitsForQuiescenceAndReclaimsOffRenderPath() {
@@ -115,6 +174,39 @@ final class RenderConfigurationPublicationTests: XCTestCase {
 
         reader.releaseRead()
         XCTAssertEqual(reclaimQuiescentRenderConfigurationsForTesting(), 0)
+    }
+
+    func testPublishedSnapshotRetainsChainUntilReaderQuiescesAndReclaims() {
+        weak var weakChain: BiquadFilterChain?
+        do {
+            let chain = BiquadFilterChain(bands: bands(1), sampleRate: 48000)
+            weakChain = chain
+            let configuration = RenderConfiguration(
+                captureClient: nil,
+                channelCount: 2,
+                scratchBuffer: nil,
+                scratchCapacity: 0,
+                balanceLeft: 1,
+                balanceRight: 1,
+                inputGain: 1,
+                volumeCompensation: 1,
+                biquadChainL: chain,
+                biquadChainR: nil
+            )
+            XCTAssertEqual(publishRenderConfigurationForTesting(configuration), 0)
+        }
+
+        XCTAssertNotNil(weakChain)
+        let reader = acquireRenderConfigurationForTesting()
+        XCTAssertNotNil(reader.configurationForTesting?.biquadChainL)
+
+        _ = publishRenderConfigurationForTesting(nil)
+        XCTAssertNotNil(weakChain)
+        XCTAssertEqual(reclaimQuiescentRenderConfigurationsForTesting(), 1)
+
+        reader.releaseRead()
+        XCTAssertEqual(reclaimQuiescentRenderConfigurationsForTesting(), 0)
+        XCTAssertNil(weakChain)
     }
 
     func testFixedConfigurationOutputIsUnchangedAcrossEquivalentFreshSnapshots() {
