@@ -21,6 +21,19 @@ else
     SIGN_ID="-"
 fi
 
+SIGN_OPTIONS=()
+HELPER_ENTITLEMENTS=(--entitlements iQualizeCapture.entitlements)
+APP_ENTITLEMENTS=(--entitlements iQualize.entitlements)
+if [[ "$SIGN_ID" == Developer\ ID\ Application:* ]]; then
+    # Notarized Developer ID builds must use the hardened runtime and must not
+    # carry the debug-only get-task-allow entitlement. Local Apple Development
+    # and ad-hoc installs keep the existing entitlement so debugging behavior is
+    # unchanged during development.
+    SIGN_OPTIONS=(--options runtime)
+    HELPER_ENTITLEMENTS=()
+    APP_ENTITLEMENTS=()
+fi
+
 # IQ_UNIVERSAL=1 builds both slices (Apple Silicon + Intel) — used for
 # distributable DMGs (create-dmg.sh). Default dev builds stay native-only:
 # the x86_64 slice roughly doubles compile time for nothing during iteration.
@@ -74,12 +87,12 @@ if [ -f "$HELPER_BIN" ] && [ "$HELPER_HASH" = "$(recorded helper)" ]; then
     # helper binary content is unchanged. Re-sign the helper anyway so the
     # enclosing app seal covers a helper with the same team identity.
     if [ "$SIGN_ID" != "-" ]; then
-        codesign --force --sign "$SIGN_ID" --identifier com.iqualize.capture --entitlements iQualizeCapture.entitlements "$HELPER_BIN" && echo "Helper signed ($SIGN_ID)"
+        codesign --force --sign "$SIGN_ID" "${SIGN_OPTIONS[@]}" --identifier codes.darius.iqualize.capture "${HELPER_ENTITLEMENTS[@]}" "$HELPER_BIN" && echo "Helper signed ($SIGN_ID)"
         NEEDS_RESIGN=1
     fi
 else
     cp -f "$HELPER_SRC" "$HELPER_BIN"
-    codesign --force --sign "$SIGN_ID" --identifier com.iqualize.capture --entitlements iQualizeCapture.entitlements "$HELPER_BIN" && echo "Helper signed ($SIGN_ID)"
+    codesign --force --sign "$SIGN_ID" "${SIGN_OPTIONS[@]}" --identifier codes.darius.iqualize.capture "${HELPER_ENTITLEMENTS[@]}" "$HELPER_BIN" && echo "Helper signed ($SIGN_ID)"
     NEEDS_RESIGN=1
     echo "Helper binary updated"
 fi
@@ -139,7 +152,7 @@ if [ "$NEEDS_RESIGN" = "1" ]; then
     printf 'helper=%s\nmain=%s\ncli=%s\n' "$HELPER_HASH" "$MAIN_HASH" "$CLI_HASH" > "$HASHES"
     # Sign the whole bundle after every resource is in place so the sealed
     # CodeResources is consistent (a partial/stale seal reads as "damaged").
-    codesign --force --sign "$SIGN_ID" --entitlements iQualize.entitlements "$APP" && echo "Signed with: $SIGN_ID"
+    codesign --force --sign "$SIGN_ID" "${SIGN_OPTIONS[@]}" "${APP_ENTITLEMENTS[@]}" "$APP" && echo "Signed with: $SIGN_ID"
 fi
 
 # Strip provenance xattr to prevent macOS security policy launch blocks

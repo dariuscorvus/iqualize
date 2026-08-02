@@ -540,7 +540,7 @@ signal(SIGTERM, SIG_IGN)
 signal(SIGINT,  SIG_IGN)
 signal(SIGHUP,  SIG_IGN)
 
-let signalQueue = DispatchQueue(label: "com.iqualize.capture.signals")
+let signalQueue = DispatchQueue(label: "codes.darius.iqualize.capture.signals")
 let sigTerm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: signalQueue)
 let sigInt  = DispatchSource.makeSignalSource(signal: SIGINT,  queue: signalQueue)
 let sigHup  = DispatchSource.makeSignalSource(signal: SIGHUP,  queue: signalQueue)

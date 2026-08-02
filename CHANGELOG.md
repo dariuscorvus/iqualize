@@ -9,6 +9,7 @@ All notable changes to iQualize will be documented in this file.
 
 ### Changed
 - Audio lifecycle requests now run through a dedicated Swift actor with explicit states, separate persisted user intent, serialized transitions, and a bounded in-memory transition history (#170).
+- The first Developer ID builds now use `codes.darius.iqualize` for the app bundle identifier and `codes.darius.iqualize.capture` for the helper signing identifier, matching the `darius.codes` domain before users grant TCC permissions to the signed app. This changes the macOS identity from earlier ad-hoc builds: System Audio Recording permission must be granted again, and existing UserDefaults-backed data may not carry over automatically, so saved presets, favorites, hidden built-ins, pinned preset, OPRA cache state, and settings can appear reset.
 - CLI capture enable/disable commands now await the lifecycle transition before returning status.
 - Capture status reports unexpected helper restarts since app launch.
 
