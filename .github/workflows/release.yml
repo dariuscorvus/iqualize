@@ -83,10 +83,20 @@ jobs:
       - name: Notarize when configured
         if: env.HAS_NOTARY_CREDENTIALS == 'true'
         run: |
-          xcrun notarytool submit iQualize-*.dmg --wait \
+          xcrun notarytool submit iQualize-*.dmg --wait --output-format json \
             --apple-id "${{ secrets.APPLE_ID }}" \
             --password "${{ secrets.APPLE_PASSWORD }}" \
-            --team-id "${{ secrets.APPLE_TEAM_ID }}"
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            | tee /tmp/notary-submit.json
+          submission_id=$(python3 -c 'import json; print(json.load(open("/tmp/notary-submit.json"))["id"])')
+          status=$(python3 -c 'import json; print(json.load(open("/tmp/notary-submit.json"))["status"])')
+          if [ "$status" != "Accepted" ]; then
+            xcrun notarytool log "$submission_id" --output-format json \
+              --apple-id "${{ secrets.APPLE_ID }}" \
+              --password "${{ secrets.APPLE_PASSWORD }}" \
+              --team-id "${{ secrets.APPLE_TEAM_ID }}"
+            exit 1
+          fi
           xcrun stapler staple iQualize-*.dmg
 
       - name: Upload DMG artifact (dry run)

@@ -107,10 +107,18 @@ fi
 
 # Bundle the CLI so it rides along in the DMG too (see Settings > "Install Command Line Tool")
 if [ -f "$CLI_BIN" ] && [ "$CLI_HASH" = "$(recorded cli)" ]; then
-    :
+    # A cert-based install may follow an earlier ad-hoc dev install where the
+    # CLI binary content is unchanged. Re-sign it anyway: notarization checks
+    # every Mach-O executable inside the bundle, including tools under
+    # Contents/Resources.
+    if [ "$SIGN_ID" != "-" ]; then
+        codesign --force --sign "$SIGN_ID" "${SIGN_OPTIONS[@]}" --identifier codes.darius.iqualize.cli "$CLI_BIN" && echo "CLI signed ($SIGN_ID)"
+        NEEDS_RESIGN=1
+    fi
 else
     cp -f "$CLI_SRC" "$CLI_BIN"
     chmod +x "$CLI_BIN"
+    codesign --force --sign "$SIGN_ID" "${SIGN_OPTIONS[@]}" --identifier codes.darius.iqualize.cli "$CLI_BIN" && echo "CLI signed ($SIGN_ID)"
     NEEDS_RESIGN=1
     echo "CLI binary updated"
 fi
