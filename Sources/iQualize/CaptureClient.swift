@@ -13,6 +13,17 @@ import os.log
 
 private let clientLog = OSLog(subsystem: "com.iqualize", category: "capture-client")
 
+enum CaptureClientError: Error, LocalizedError, Equatable, Sendable {
+    case handshakeTimeout(seconds: Double)
+
+    var errorDescription: String? {
+        switch self {
+        case .handshakeTimeout(let seconds):
+            return "Capture helper handshake timed out after \(seconds) seconds."
+        }
+    }
+}
+
 // Must match Sources/iQualizeCapture/main.swift exactly.
 // Internal (not private) so the resampler tests can build a synthetic ring.
 struct SharedHeader {
@@ -25,6 +36,8 @@ struct SharedHeader {
 }
 
 final class CaptureClient: @unchecked Sendable {
+    static let defaultHandshakeTimeoutNanoseconds: UInt64 = 10_000_000_000
+
     private(set) var sampleRate: Float64 = 0
     private(set) var channels: UInt32 = 0
     private(set) var capacityFloats: UInt32 = 0
@@ -48,6 +61,7 @@ final class CaptureClient: @unchecked Sendable {
     private var readHeadPtr: UnsafeMutablePointer<UInt64>?
     private var capacityFrames: Int = 0
     private var baseTargetFill: Int = 0
+    private let handshakeTimeoutNanoseconds: UInt64
 
     // Drift-compensator state (#133). Render-thread-only, same single-consumer
     // contract as the old read(): no synchronization needed.
@@ -90,6 +104,10 @@ final class CaptureClient: @unchecked Sendable {
         var overrunResyncs: UInt64
     }
 
+    init(handshakeTimeoutNanoseconds: UInt64 = CaptureClient.defaultHandshakeTimeoutNanoseconds) {
+        self.handshakeTimeoutNanoseconds = handshakeTimeoutNanoseconds
+    }
+
     func telemetrySnapshot() -> Telemetry {
         Telemetry(
             fillFrames: Int(truncatingIfNeeded: iq_load_relaxed_u64(telemetrySlots + TelemetrySlot.fillFrames)),
@@ -128,83 +146,133 @@ final class CaptureClient: @unchecked Sendable {
                 self.onUnexpectedTermination?()
             }
         }
-        try proc.run()
-        process = proc
 
-        // Read handshake (single JSON line terminated by \n) via POSIX read(2)
-        // directly on the pipe FD. FileHandle.read(upToCount:) hangs in this
-        // configuration (Process pipes from a GUI-launched .app) — empirically
-        // observed even after the helper has written + fsync'd the full line.
-        let readFD = stdoutPipe.fileHandleForReading.fileDescriptor
+        do {
+            intentionallyStopping = false
+            try proc.run()
+            process = proc
+
+            // Read the single JSON handshake line with a poll deadline. A
+            // blocking read here runs on the main actor and used to leave the
+            // entire app wedged when the helper stopped making progress.
+            let readFD = stdoutPipe.fileHandleForReading.fileDescriptor
+            var lineData = try readHandshake(from: readFD, process: proc)
+            if let newlineIdx = lineData.firstIndex(of: 0x0a) {
+                lineData = lineData.prefix(upTo: newlineIdx)
+            }
+
+            let json = try JSONSerialization.jsonObject(with: lineData) as? [String: Any] ?? [:]
+            guard let shmPath = json["shmPath"] as? String,
+                  let totalSize = json["totalSize"] as? Int,
+                  let headerSize = json["headerSize"] as? Int,
+                  let sr = json["sampleRate"] as? Double,
+                  let ch = json["channels"] as? Int,
+                  let capFloats = json["ringCapacityFloats"] as? Int else {
+                throw NSError(domain: "iQualize", code: -103,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                         "Capture helper sent malformed handshake: \(String(data: lineData, encoding: .utf8) ?? "<binary>")"])
+            }
+
+            // Open the file-backed shared memory region the helper created.
+            let fd = shmPath.withCString { open($0, O_RDWR) }
+            if fd < 0 {
+                throw NSError(domain: "iQualize", code: -104,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                         "open(\(shmPath)) failed: errno \(errno)"])
+            }
+            shmFD = fd
+
+            guard let mapped = mmap(nil, size_t(totalSize),
+                                    PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0),
+                  mapped != MAP_FAILED else {
+                throw NSError(domain: "iQualize", code: -105,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                         "mmap failed: errno \(errno)"])
+            }
+            mappedRegion = mapped
+            mappedSize = size_t(totalSize)
+
+            // Unlink the backing file now that both sides hold it mapped. The
+            // storage stays alive via our + the helper's open fd/mmap regardless
+            // of how either process later exits (crash, SIGKILL, whatever) — the
+            // OS reclaims it once both fds close, with no dependence on either
+            // side's cleanup code actually running. Also closes the window where
+            // a predictable, world-writable path in /tmp is reachable by name.
+            _ = shmPath.withCString { unlink($0) }
+
+            attach(region: mapped, headerSize: headerSize,
+                   capacityFloats: capFloats, sampleRate: sr, channels: UInt32(ch))
+
+            os_log(.default, log: clientLog,
+                   "capture helper ready: pid=%{public}d sr=%{public}.0f ch=%{public}u cap=%{public}d target=%{public}d",
+                   proc.processIdentifier, sr, UInt32(ch), capFloats, baseTargetFill)
+        } catch {
+            // The caller cannot own this client until start() succeeds, so
+            // failed handshakes must release the process and any mapped state
+            // here rather than relying on AudioEngine teardown.
+            stop()
+            throw error
+        }
+    }
+
+    private func readHandshake(from fd: Int32, process: Process) throws -> Data {
+        let deadline = DispatchTime.now().uptimeNanoseconds &+ handshakeTimeoutNanoseconds
         var lineData = Data()
         var buf = [UInt8](repeating: 0, count: 4096)
+
         while !lineData.contains(0x0a) {
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard now < deadline else {
+                throw CaptureClientError.handshakeTimeout(
+                    seconds: Double(handshakeTimeoutNanoseconds) / 1_000_000_000
+                )
+            }
+
+            let remaining = deadline - now
+            let timeoutMilliseconds = min(
+                UInt64(Int32.max),
+                max(1, (remaining + 999_999) / 1_000_000)
+            )
+            var descriptor = pollfd(
+                fd: fd,
+                events: Int16(POLLIN | POLLHUP | POLLERR),
+                revents: 0
+            )
+            let ready = poll(&descriptor, 1, Int32(timeoutMilliseconds))
+            if ready < 0 {
+                if errno == EINTR { continue }
+                throw NSError(domain: "iQualize", code: -106,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                         "poll(handshake) errno=\(errno)"])
+            }
+            if ready == 0 {
+                throw CaptureClientError.handshakeTimeout(
+                    seconds: Double(handshakeTimeoutNanoseconds) / 1_000_000_000
+                )
+            }
+            if descriptor.revents & Int16(POLLNVAL) != 0 {
+                throw NSError(domain: "iQualize", code: -106,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                         "poll(handshake) reported an invalid descriptor"])
+            }
+
             let n = buf.withUnsafeMutableBufferPointer { ptr in
-                Darwin.read(readFD, ptr.baseAddress, ptr.count)
+                Darwin.read(fd, ptr.baseAddress, ptr.count)
             }
             if n > 0 {
                 lineData.append(buf, count: n)
             } else if n == 0 {
-                proc.waitUntilExit()
+                process.waitUntilExit()
                 throw NSError(domain: "iQualize", code: -102,
                               userInfo: [NSLocalizedDescriptionKey:
-                                         "Capture helper exited before handshake (status=\(proc.terminationStatus))"])
-            } else {
-                if errno == EINTR { continue }
+                                         "Capture helper exited before handshake (status=\(process.terminationStatus))"])
+            } else if errno != EINTR {
                 throw NSError(domain: "iQualize", code: -106,
                               userInfo: [NSLocalizedDescriptionKey:
                                          "read(handshake) errno=\(errno)"])
             }
         }
-        if let newlineIdx = lineData.firstIndex(of: 0x0a) {
-            lineData = lineData.prefix(upTo: newlineIdx)
-        }
-
-        let json = try JSONSerialization.jsonObject(with: lineData) as? [String: Any] ?? [:]
-        guard let shmPath = json["shmPath"] as? String,
-              let totalSize = json["totalSize"] as? Int,
-              let headerSize = json["headerSize"] as? Int,
-              let sr = json["sampleRate"] as? Double,
-              let ch = json["channels"] as? Int,
-              let capFloats = json["ringCapacityFloats"] as? Int else {
-            throw NSError(domain: "iQualize", code: -103,
-                          userInfo: [NSLocalizedDescriptionKey:
-                                     "Capture helper sent malformed handshake: \(String(data: lineData, encoding: .utf8) ?? "<binary>")"])
-        }
-
-        // Open the file-backed shared memory region the helper created.
-        let fd = shmPath.withCString { open($0, O_RDWR) }
-        if fd < 0 {
-            throw NSError(domain: "iQualize", code: -104,
-                          userInfo: [NSLocalizedDescriptionKey:
-                                     "open(\(shmPath)) failed: errno \(errno)"])
-        }
-        shmFD = fd
-
-        guard let mapped = mmap(nil, size_t(totalSize),
-                                PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0),
-              mapped != MAP_FAILED else {
-            throw NSError(domain: "iQualize", code: -105,
-                          userInfo: [NSLocalizedDescriptionKey:
-                                     "mmap failed: errno \(errno)"])
-        }
-        mappedRegion = mapped
-        mappedSize = size_t(totalSize)
-
-        // Unlink the backing file now that both sides hold it mapped. The
-        // storage stays alive via our + the helper's open fd/mmap regardless
-        // of how either process later exits (crash, SIGKILL, whatever) — the
-        // OS reclaims it once both fds close, with no dependence on either
-        // side's cleanup code actually running. Also closes the window where
-        // a predictable, world-writable path in /tmp is reachable by name.
-        _ = shmPath.withCString { unlink($0) }
-
-        attach(region: mapped, headerSize: headerSize,
-               capacityFloats: capFloats, sampleRate: sr, channels: UInt32(ch))
-
-        os_log(.default, log: clientLog,
-               "capture helper ready: pid=%{public}d sr=%{public}.0f ch=%{public}u cap=%{public}d target=%{public}d",
-               proc.processIdentifier, sr, UInt32(ch), capFloats, baseTargetFill)
+        return lineData
     }
 
     /// Binds an already-mapped ring region and derives the drift-compensator
@@ -243,7 +311,12 @@ final class CaptureClient: @unchecked Sendable {
             // Closing stdin tells the helper's watcher to exit cleanly.
             // SIGTERM is a backup if the watcher isn't fast enough.
             (proc.standardInput as? Pipe)?.fileHandleForWriting.closeFile()
-            proc.terminate()
+            if proc.isRunning {
+                proc.terminate()
+            }
+            if proc.isRunning {
+                kill(proc.processIdentifier, SIGKILL)
+            }
             proc.waitUntilExit()
             process = nil
         }

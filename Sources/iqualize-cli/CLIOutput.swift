@@ -63,5 +63,8 @@ func formatStatus(_ status: CLIStatusPayload) -> String {
         lines += "\n" + String(format: "Capture: fill %d frames, drift %+.1f ppm, underruns %d, resyncs %d",
                                fill, ppm, underruns, resyncs)
     }
+    if let restarts = status.captureHelperRestarts, restarts > 0 {
+        lines += "\nCapture helper restarts: \(restarts)"
+    }
     return lines
 }

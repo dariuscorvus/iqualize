@@ -27,8 +27,8 @@ protocol CLICommandHandling: AnyObject {
     @discardableResult func togglePreEqSpectrum() -> Bool
     func setPostEqSpectrum(_ enabled: Bool)
     @discardableResult func togglePostEqSpectrum() -> Bool
-    func setCapture(_ enabled: Bool)
-    @discardableResult func toggleCapture() -> Bool
+    func setCapture(_ enabled: Bool) async
+    @discardableResult func toggleCapture() async -> Bool
 
     // Band editing
     func listBands() -> [CLIBandSummary]
@@ -161,7 +161,12 @@ final class CLIControlServer: @unchecked Sendable {
     /// the very thread synchronously blocked waiting for it. Handled via a detached `Task`
     /// instead, which returns control to `acceptConnection`'s caller immediately so the
     /// queue stays free for other (fast, synchronous) connections in the meantime.
-    private static let asyncCommands: Set<String> = [CLICommand.searchOPRA, CLICommand.importOPRA]
+    private static let asyncCommands: Set<String> = [
+        CLICommand.searchOPRA,
+        CLICommand.importOPRA,
+        CLICommand.setCapture,
+        CLICommand.toggleCapture,
+    ]
 
     private func acceptConnection() {
         let clientFD = accept(listenerFD, nil, nil)
@@ -219,6 +224,15 @@ final class CLIControlServer: @unchecked Sendable {
                 let preset = try await handler.importOPRA(query: query, curveAuthor: request.stringArg2, overwrite: request.boolArg ?? false)
                 return .success(presets: [preset])
             } catch let e as CLIHandlerError { return .failure(e.message) } catch { return .failure(error.localizedDescription) }
+
+        case CLICommand.setCapture:
+            guard let value = request.boolArg else { return .failure("missing capture value") }
+            await handler.setCapture(value)
+            return .success(status: handler.statusSnapshot())
+
+        case CLICommand.toggleCapture:
+            _ = await handler.toggleCapture()
+            return .success(status: handler.statusSnapshot())
 
         default:
             return .failure("unknown async command '\(request.command)'")
@@ -300,15 +314,6 @@ final class CLIControlServer: @unchecked Sendable {
 
         case CLICommand.togglePostEqSpectrum:
             handler.togglePostEqSpectrum()
-            return .success(status: handler.statusSnapshot())
-
-        case CLICommand.setCapture:
-            guard let value = request.boolArg else { return .failure("missing capture value") }
-            handler.setCapture(value)
-            return .success(status: handler.statusSnapshot())
-
-        case CLICommand.toggleCapture:
-            handler.toggleCapture()
             return .success(status: handler.statusSnapshot())
 
         case CLICommand.listBands:

@@ -9,7 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var audioEngine: AudioEngine!
     private var presetStore: PresetStore!
     private var cliControlServer: CLIControlServer!
-    private var wasRunningBeforeSleep = false
+    private var terminationInProgress = false
     var isRealQuit = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -63,7 +63,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if isRealQuit {
-            return .terminateNow
+            guard !terminationInProgress else { return .terminateNow }
+            terminationInProgress = true
+            Task { @MainActor [weak self] in
+                await self?.audioEngine.shutdown()
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
         }
         // Dock quit: hide to menu bar instead of terminating
         // Only close titled windows (EQ, Settings) — not internal status item windows
@@ -87,7 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationWillTerminate(_ notification: Notification) {
         cliControlServer.stop()
-        audioEngine.stop()
+        audioEngine.requestShutdown()
     }
 
     @objc func realQuit(_ sender: Any?) {
@@ -200,17 +206,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     private func handleSleep() {
-        wasRunningBeforeSleep = audioEngine.isRunning
-        if audioEngine.isRunning {
-            audioEngine.stop()
+        Task { @MainActor [weak self] in
+            await self?.audioEngine.handleSleep()
         }
     }
 
     private func handleWake() {
-        if wasRunningBeforeSleep {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.audioEngine.setEnabled(true)
-            }
+        Task { @MainActor [weak self] in
+            await self?.audioEngine.handleWake()
         }
     }
 }

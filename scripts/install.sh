@@ -70,7 +70,13 @@ CLI_HASH=$(hash_of "$CLI_SRC")
 # without it, codesign derives one from the Mach-O UUID, which changes on
 # every relink and would break a cert-based TCC grant across rebuilds.
 if [ -f "$HELPER_BIN" ] && [ "$HELPER_HASH" = "$(recorded helper)" ]; then
-    :
+    # A cert-based install may follow an earlier ad-hoc dev install where the
+    # helper binary content is unchanged. Re-sign the helper anyway so the
+    # enclosing app seal covers a helper with the same team identity.
+    if [ "$SIGN_ID" != "-" ]; then
+        codesign --force --sign "$SIGN_ID" --identifier com.iqualize.capture --entitlements iQualizeCapture.entitlements "$HELPER_BIN" && echo "Helper signed ($SIGN_ID)"
+        NEEDS_RESIGN=1
+    fi
 else
     cp -f "$HELPER_SRC" "$HELPER_BIN"
     codesign --force --sign "$SIGN_ID" --identifier com.iqualize.capture --entitlements iQualizeCapture.entitlements "$HELPER_BIN" && echo "Helper signed ($SIGN_ID)"
