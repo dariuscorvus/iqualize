@@ -23,6 +23,13 @@ let package = Package(
             name: "IQRingAtomics",
             path: "Sources/IQRingAtomics"
         ),
+        // Shared-memory capture contract (#175): the single SharedHeader
+        // definition, the layout version, and handshake-geometry validation
+        // used by both the app (CaptureClient) and the capture helper.
+        .target(
+            name: "IQCaptureProtocol",
+            path: "Sources/IQCaptureProtocol"
+        ),
         // Named "iqualize-cli", not "iqualize" — a same-named target would collide with
         // the "iQualize" app target's binary on macOS's default case-insensitive filesystem.
         // install.sh renames the built binary to "iqualize" when it copies it into place.
@@ -39,6 +46,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Markdown", package: "swift-markdown"),
                 "IQControlProtocol",
+                "IQCaptureProtocol",
                 "IQRingAtomics",
             ],
             path: "Sources/iQualize",
@@ -64,7 +72,7 @@ let package = Package(
         // Continuity (just like Spotify). See docs/CONTINUITY.md.
         .executableTarget(
             name: "iQualizeCapture",
-            dependencies: ["IQRingAtomics"],
+            dependencies: ["IQRingAtomics", "IQCaptureProtocol"],
             path: "Sources/iQualizeCapture",
             linkerSettings: [
                 .linkedFramework("CoreAudio"),
@@ -75,7 +83,7 @@ let package = Package(
         // the test bundle.
         .testTarget(
             name: "iQualizeTests",
-            dependencies: ["iQualize", "IQControlProtocol", "iqualize-cli"],
+            dependencies: ["iQualize", "IQControlProtocol", "IQCaptureProtocol", "iqualize-cli"],
             path: "Tests/iQualizeTests"
         ),
     ],

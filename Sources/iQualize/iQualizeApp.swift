@@ -9,6 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var audioEngine: AudioEngine!
     private var presetStore: PresetStore!
     private var cliControlServer: CLIControlServer!
+    private let settings: SettingsStore
+
+    init(settings: SettingsStore) {
+        self.settings = settings
+        super.init()
+    }
     private var terminationInProgress = false
     var isRealQuit = false
 
@@ -21,17 +27,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         audioEngine = AudioEngine()
         presetStore = PresetStore()
-        menuBarController = MenuBarController(audioEngine: audioEngine, presetStore: presetStore)
+        menuBarController = MenuBarController(audioEngine: audioEngine, presetStore: presetStore, settings: settings)
 
         cliControlServer = CLIControlServer(handler: menuBarController)
         cliControlServer.start()
 
         // Sync login item state (user may have changed it in System Settings)
-        var launchState = iQualizeState.load()
         let systemEnabled = SMAppService.mainApp.status == .enabled
-        if launchState.startAtLogin != systemEnabled {
-            launchState.startAtLogin = systemEnabled
-            launchState.save()
+        if settings.state.startAtLogin != systemEnabled {
+            settings.set(\.startAtLogin, systemEnabled)
         }
 
         // Sleep/wake handling
@@ -77,10 +81,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             window.close()
         }
         NSApp.setActivationPolicy(.accessory)
-        var state = iQualizeState.load()
-        state.hideFromDock = true
-        state.windowOpen = false
-        state.save()
+        settings.update {
+            $0.hideFromDock = true
+            $0.windowOpen = false
+        }
         return .terminateCancel
     }
 
@@ -229,9 +233,9 @@ struct iQualizeMain {
     static func main() {
         if #available(macOS 14.2, *) {
             let app = NSApplication.shared
-            let launchState = iQualizeState.load()
-            app.setActivationPolicy(launchState.hideFromDock ? .accessory : .regular)
-            let delegate = AppDelegate()
+            let settings = SettingsStore()
+            app.setActivationPolicy(settings.state.hideFromDock ? .accessory : .regular)
+            let delegate = AppDelegate(settings: settings)
             appDelegate = delegate
             app.delegate = delegate
             app.run()

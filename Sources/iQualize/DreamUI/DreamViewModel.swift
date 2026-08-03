@@ -12,6 +12,7 @@ final class DreamViewModel {
 
     let audioEngine: AudioEngine
     let presetStore: PresetStore
+    let settings: SettingsStore
 
     /// Window's undo manager — set by EQWindowController once the window exists.
     @ObservationIgnored
@@ -114,9 +115,10 @@ final class DreamViewModel {
 
     // MARK: - Init
 
-    init(audioEngine: AudioEngine, presetStore: PresetStore) {
+    init(audioEngine: AudioEngine, presetStore: PresetStore, settings: SettingsStore) {
         self.audioEngine = audioEngine
         self.presetStore = presetStore
+        self.settings = settings
         loadPersistedState()
         syncFromAudioEngine(initial: true)
     }
@@ -124,7 +126,7 @@ final class DreamViewModel {
     // MARK: - Persistence
 
     private func loadPersistedState() {
-        let s = iQualizeState.load()
+        let s = settings.state
         if let raw = s.dreamTheme, let t = DreamThemePreference(rawValue: raw) { theme = t }
         snapToSemitone = s.snapToSemitone
         zoomRange = s.zoomRange.flatMap(ZoomRange.init(rawValue:)) ?? .full
@@ -153,37 +155,31 @@ final class DreamViewModel {
     }
 
     func persistSnap() {
-        var s = iQualizeState.load()
-        s.snapToSemitone = snapToSemitone
-        s.save()
+        settings.set(\.snapToSemitone, snapToSemitone)
     }
 
     func persistZoomRange() {
-        var s = iQualizeState.load()
-        s.zoomRange = zoomRange.rawValue
-        s.save()
+        settings.set(\.zoomRange, zoomRange.rawValue)
     }
 
     func persistBandwidthDisplay() {
-        var s = iQualizeState.load()
-        s.showBandwidthAsQ = (bandwidthDisplay == .q)
-        s.save()
+        settings.set(\.showBandwidthAsQ, bandwidthDisplay == .q)
     }
 
     func persistFooterToggles() {
-        var s = iQualizeState.load()
-        s.peakLimiter = peakLimiter
-        s.bypassed = bypass
-        s.autoScale = autoScale
-        s.preEqSpectrumEnabled = preEqEnabled
-        s.postEqSpectrumEnabled = postEqEnabled
-        s.balance = balance
-        s.inputGainDB = inGainDB
-        s.outputGainDB = outGainDB
-        s.maxGainDB = maxGainDB
-        s.splitChannelEnabled = channel != .linked
-        s.activeChannel = channel == .r ? "right" : (channel == .l ? "left" : nil)
-        s.save()
+        settings.update {
+            $0.peakLimiter = peakLimiter
+            $0.bypassed = bypass
+            $0.autoScale = autoScale
+            $0.preEqSpectrumEnabled = preEqEnabled
+            $0.postEqSpectrumEnabled = postEqEnabled
+            $0.balance = balance
+            $0.inputGainDB = inGainDB
+            $0.outputGainDB = outGainDB
+            $0.maxGainDB = maxGainDB
+            $0.splitChannelEnabled = channel != .linked
+            $0.activeChannel = channel == .r ? "right" : (channel == .l ? "left" : nil)
+        }
     }
 
     // MARK: - Audio engine sync
@@ -555,9 +551,7 @@ final class DreamViewModel {
         isModified = false
         syncFromAudioEngine()
         registerUndo(actionName: "Load Preset", oldPreset: oldPreset)
-        var s = iQualizeState.load()
-        s.selectedPresetID = preset.id
-        s.save()
+        settings.set(\.selectedPresetID, preset.id)
     }
 
     func resetToSnapshot() {
@@ -604,9 +598,7 @@ final class DreamViewModel {
         savedSnapshot = preset
         isModified = false
         onTitleShouldUpdate?()
-        var s = iQualizeState.load()
-        s.selectedPresetID = preset.id
-        s.save()
+        settings.set(\.selectedPresetID, preset.id)
     }
 
     /// Reverts the active built-in preset to its shipped original — undoes not just the
@@ -651,9 +643,7 @@ final class DreamViewModel {
         isModified = false
         syncFromAudioEngine()
         registerUndo(actionName: "Save As", oldPreset: old)
-        var s = iQualizeState.load()
-        s.selectedPresetID = newPreset.id
-        s.save()
+        settings.set(\.selectedPresetID, newPreset.id)
     }
 
     /// Confirms before deleting — a built-in is hidden (recoverable from the Preset Browser),
@@ -688,9 +678,7 @@ final class DreamViewModel {
         isModified = false
         syncFromAudioEngine()
         registerUndo(actionName: "Delete Preset", oldPreset: old)
-        var s = iQualizeState.load()
-        s.selectedPresetID = EQPresetData.flat.id
-        s.save()
+        settings.set(\.selectedPresetID, EQPresetData.flat.id)
     }
 
     // MARK: - Undo / Redo

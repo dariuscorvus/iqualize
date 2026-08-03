@@ -8,32 +8,51 @@
 
 import Foundation
 import Darwin
+import IQCaptureProtocol
 import IQRingAtomics
 import os.log
 
 private let clientLog = OSLog(subsystem: "com.iqualize", category: "capture-client")
 
 enum CaptureClientError: Error, LocalizedError, Equatable, Sendable {
+    case helperMissing(path: String)
     case handshakeTimeout(seconds: Double)
+    case malformedHandshake
+    case helperStartupFailed(CaptureStartupFailure)
+    case unexpectedExit(status: Int32, signaled: Bool)
+    case handshakeReadFailed(errno: Int32)
+    case sharedMemoryOpenFailed(errno: Int32)
+    case sharedMemoryStatFailed(errno: Int32)
+    case sharedMemoryMapFailed(errno: Int32)
 
     var errorDescription: String? {
         switch self {
+        case .helperMissing(let path):
+            return "Capture helper is missing or not executable at \(path)."
         case .handshakeTimeout(let seconds):
             return "Capture helper handshake timed out after \(seconds) seconds."
+        case .malformedHandshake:
+            return "Capture helper sent a malformed startup message."
+        case .helperStartupFailed(let failure):
+            return "Capture helper failed during \(failure.stage.rawValue) with exit code \(failure.exitCode)."
+        case .unexpectedExit(let status, let signaled):
+            return signaled
+                ? "Capture helper terminated by signal \(status) before the handshake."
+                : "Capture helper exited with status \(status) before the handshake."
+        case .handshakeReadFailed(let errno):
+            return "Capture helper handshake read failed with errno \(errno)."
+        case .sharedMemoryOpenFailed(let errno):
+            return "Capture helper shared memory open failed with errno \(errno)."
+        case .sharedMemoryStatFailed(let errno):
+            return "Capture helper shared memory stat failed with errno \(errno)."
+        case .sharedMemoryMapFailed(let errno):
+            return "Capture helper shared memory mapping failed with errno \(errno)."
         }
     }
 }
 
-// Must match Sources/iQualizeCapture/main.swift exactly.
-// Internal (not private) so the resampler tests can build a synthetic ring.
-struct SharedHeader {
-    var writeHead: UInt64
-    var readHead: UInt64
-    var sampleRate: Float64
-    var channels: UInt32
-    var capacityFloats: UInt32
-    var _pad: (UInt64, UInt64, UInt32)
-}
+// The shared-memory layout and handshake validation live in IQCaptureProtocol
+// (SharedHeader, CaptureGeometry) — one definition shared with the helper.
 
 final class CaptureClient: @unchecked Sendable {
     static let defaultHandshakeTimeoutNanoseconds: UInt64 = 10_000_000_000
@@ -125,9 +144,7 @@ final class CaptureClient: @unchecked Sendable {
     /// Throws if anything fails — caller should treat as a hard error.
     func start(helperURL: URL) throws {
         guard FileManager.default.isExecutableFile(atPath: helperURL.path) else {
-            throw NSError(domain: "iQualize", code: -100,
-                          userInfo: [NSLocalizedDescriptionKey:
-                                     "Capture helper not found or not executable at \(helperURL.path)"])
+            throw CaptureClientError.helperMissing(path: helperURL.path)
         }
 
         let proc = Process()
@@ -161,33 +178,68 @@ final class CaptureClient: @unchecked Sendable {
                 lineData = lineData.prefix(upTo: newlineIdx)
             }
 
-            let json = try JSONSerialization.jsonObject(with: lineData) as? [String: Any] ?? [:]
+            let helperFailure: CaptureStartupFailure?
+            do {
+                helperFailure = try CaptureStartupFailure.decodeIfPresent(from: lineData)
+            } catch {
+                throw CaptureClientError.malformedHandshake
+            }
+            if let helperFailure {
+                throw CaptureClientError.helperStartupFailed(helperFailure)
+            }
+
+            guard let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                throw CaptureClientError.malformedHandshake
+            }
             guard let shmPath = json["shmPath"] as? String,
                   let totalSize = json["totalSize"] as? Int,
                   let headerSize = json["headerSize"] as? Int,
                   let sr = json["sampleRate"] as? Double,
                   let ch = json["channels"] as? Int,
                   let capFloats = json["ringCapacityFloats"] as? Int else {
-                throw NSError(domain: "iQualize", code: -103,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                         "Capture helper sent malformed handshake: \(String(data: lineData, encoding: .utf8) ?? "<binary>")"])
+                throw CaptureClientError.malformedHandshake
             }
+
+            let layoutVersion: UInt32?
+            if let rawLayoutVersion = json["layoutVersion"] {
+                guard let intLayoutVersion = rawLayoutVersion as? Int,
+                      let exactLayoutVersion = UInt32(exactly: intLayoutVersion) else {
+                    throw CaptureProtocolError.invalidGeometry("layoutVersion=\(rawLayoutVersion)")
+                }
+                layoutVersion = exactLayoutVersion
+            } else {
+                layoutVersion = nil
+            }
+
+            // Absent layoutVersion means a legacy version-1 helper. Validate
+            // the version and every geometry value before any of it reaches
+            // mmap, bindMemory, the ring mask, or a division (#175).
+            let geometry = CaptureGeometry(
+                layoutVersion: layoutVersion,
+                totalSize: totalSize, headerSize: headerSize,
+                sampleRate: sr, channels: ch, capacityFloats: capFloats)
+            try geometry.validate()
 
             // Open the file-backed shared memory region the helper created.
             let fd = shmPath.withCString { open($0, O_RDWR) }
             if fd < 0 {
-                throw NSError(domain: "iQualize", code: -104,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                         "open(\(shmPath)) failed: errno \(errno)"])
+                throw CaptureClientError.sharedMemoryOpenFailed(errno: errno)
             }
             shmFD = fd
+
+            var statBuffer = stat()
+            guard fstat(fd, &statBuffer) == 0 else {
+                throw CaptureClientError.sharedMemoryStatFailed(errno: errno)
+            }
+            guard statBuffer.st_size == off_t(totalSize) else {
+                throw CaptureProtocolError.invalidGeometry(
+                    "fileSize=\(statBuffer.st_size), expected totalSize=\(totalSize)")
+            }
 
             guard let mapped = mmap(nil, size_t(totalSize),
                                     PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0),
                   mapped != MAP_FAILED else {
-                throw NSError(domain: "iQualize", code: -105,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                         "mmap failed: errno \(errno)"])
+                throw CaptureClientError.sharedMemoryMapFailed(errno: errno)
             }
             mappedRegion = mapped
             mappedSize = size_t(totalSize)
@@ -199,6 +251,12 @@ final class CaptureClient: @unchecked Sendable {
             // side's cleanup code actually running. Also closes the window where
             // a predictable, world-writable path in /tmp is reachable by name.
             _ = shmPath.withCString { unlink($0) }
+
+            // The handshake and the mapped header describe the same region
+            // through two channels; a disagreement means the shm writer is
+            // not the binary that sent this handshake — refuse to attach.
+            try geometry.validate(
+                against: mapped.bindMemory(to: SharedHeader.self, capacity: 1).pointee)
 
             attach(region: mapped, headerSize: headerSize,
                    capacityFloats: capFloats, sampleRate: sr, channels: UInt32(ch))
@@ -241,9 +299,7 @@ final class CaptureClient: @unchecked Sendable {
             let ready = poll(&descriptor, 1, Int32(timeoutMilliseconds))
             if ready < 0 {
                 if errno == EINTR { continue }
-                throw NSError(domain: "iQualize", code: -106,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                         "poll(handshake) errno=\(errno)"])
+                throw CaptureClientError.handshakeReadFailed(errno: errno)
             }
             if ready == 0 {
                 throw CaptureClientError.handshakeTimeout(
@@ -251,9 +307,7 @@ final class CaptureClient: @unchecked Sendable {
                 )
             }
             if descriptor.revents & Int16(POLLNVAL) != 0 {
-                throw NSError(domain: "iQualize", code: -106,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                         "poll(handshake) reported an invalid descriptor"])
+                throw CaptureClientError.handshakeReadFailed(errno: EBADF)
             }
 
             let n = buf.withUnsafeMutableBufferPointer { ptr in
@@ -261,15 +315,17 @@ final class CaptureClient: @unchecked Sendable {
             }
             if n > 0 {
                 lineData.append(buf, count: n)
+                if lineData.count > CaptureStartupFailure.maxLineBytes {
+                    throw CaptureClientError.malformedHandshake
+                }
             } else if n == 0 {
                 process.waitUntilExit()
-                throw NSError(domain: "iQualize", code: -102,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                         "Capture helper exited before handshake (status=\(process.terminationStatus))"])
+                throw CaptureClientError.unexpectedExit(
+                    status: process.terminationStatus,
+                    signaled: process.terminationReason == .uncaughtSignal
+                )
             } else if errno != EINTR {
-                throw NSError(domain: "iQualize", code: -106,
-                              userInfo: [NSLocalizedDescriptionKey:
-                                         "read(handshake) errno=\(errno)"])
+                throw CaptureClientError.handshakeReadFailed(errno: errno)
             }
         }
         return lineData
@@ -313,6 +369,14 @@ final class CaptureClient: @unchecked Sendable {
             (proc.standardInput as? Pipe)?.fileHandleForWriting.closeFile()
             if proc.isRunning {
                 proc.terminate()
+            }
+            // Bounded grace before SIGKILL: the helper's SIGTERM path unlinks
+            // its shm file and tears down its CoreAudio objects, and an
+            // immediate SIGKILL forfeits that cleanup. Production helpers
+            // exit on stdin-EOF in well under this.
+            let killDeadline = DispatchTime.now().uptimeNanoseconds &+ 500_000_000
+            while proc.isRunning && DispatchTime.now().uptimeNanoseconds < killDeadline {
+                usleep(10_000)
             }
             if proc.isRunning {
                 kill(proc.processIdentifier, SIGKILL)

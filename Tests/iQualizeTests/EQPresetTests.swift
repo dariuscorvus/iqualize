@@ -123,4 +123,87 @@ final class iQualizeStateTests: XCTestCase {
         XCTAssertEqual(decoded.selectedPresetID, original.selectedPresetID)
         XCTAssertEqual(decoded.peakLimiter, original.peakLimiter)
     }
+
+    func testGarbagePersistedStateFallsBackAndPreservesBackup() {
+        let defaults = makeIsolatedDefaults()
+        let garbage = Data([0x00, 0xFF, 0x12, 0x34])
+        defaults.set(garbage, forKey: iQualizeState.key)
+
+        let state = iQualizeState.readPersisted(from: defaults)
+
+        XCTAssertEqual(state.selectedPresetID, iQualizeState.defaultState.selectedPresetID)
+        XCTAssertEqual(defaults.data(forKey: iQualizeState.key), garbage)
+        XCTAssertEqual(corruptBackups(in: defaults).map(\.value), [garbage])
+    }
+
+    func testTruncatedPersistedStateFallsBackAndPreservesBackup() throws {
+        let defaults = makeIsolatedDefaults()
+        let valid = try JSONEncoder().encode(iQualizeState(captureEnabled: false, selectedPresetID: EQPresetData.vocalClarity.id, peakLimiter: false))
+        let truncated = valid.prefix(max(1, valid.count / 2))
+        defaults.set(Data(truncated), forKey: iQualizeState.key)
+
+        let state = iQualizeState.readPersisted(from: defaults)
+
+        XCTAssertEqual(state.captureEnabled, iQualizeState.defaultState.captureEnabled)
+        XCTAssertEqual(defaults.data(forKey: iQualizeState.key), Data(truncated))
+        XCTAssertEqual(corruptBackups(in: defaults).map(\.value), [Data(truncated)])
+    }
+
+    @MainActor
+    func testCorruptBackupSurvivesLaterSettingsStoreWrite() {
+        let defaults = makeIsolatedDefaults()
+        let garbage = Data("not-json".utf8)
+        defaults.set(garbage, forKey: iQualizeState.key)
+
+        let store = SettingsStore(userDefaults: defaults)
+        store.set(\.captureEnabled, false)
+
+        XCTAssertEqual(corruptBackups(in: defaults).map(\.value), [garbage])
+        let persisted = iQualizeState.readPersisted(from: defaults)
+        XCTAssertFalse(persisted.captureEnabled)
+    }
+
+    func testValidPersistedStateLoadsWithoutBackup() throws {
+        let defaults = makeIsolatedDefaults()
+        let original = iQualizeState(captureEnabled: false, selectedPresetID: EQPresetData.bassBoost.id, peakLimiter: false)
+        defaults.set(try JSONEncoder().encode(original), forKey: iQualizeState.key)
+
+        let state = iQualizeState.readPersisted(from: defaults)
+
+        XCTAssertFalse(state.captureEnabled)
+        XCTAssertEqual(state.selectedPresetID, EQPresetData.bassBoost.id)
+        XCTAssertFalse(state.peakLimiter)
+        XCTAssertTrue(corruptBackups(in: defaults).isEmpty)
+    }
+
+    func testMissingPersistedStateFallsBackWithoutBackup() {
+        let defaults = makeIsolatedDefaults()
+
+        let state = iQualizeState.readPersisted(from: defaults)
+
+        XCTAssertEqual(state.selectedPresetID, iQualizeState.defaultState.selectedPresetID)
+        XCTAssertNil(defaults.data(forKey: iQualizeState.key))
+        XCTAssertTrue(corruptBackups(in: defaults).isEmpty)
+    }
+
+    private func makeIsolatedDefaults() -> UserDefaults {
+        let suiteName = "iQualizeStateTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        addTeardownBlock {
+            UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName)
+        }
+        return defaults
+    }
+
+    private func corruptBackups(in defaults: UserDefaults) -> [(key: String, value: Data)] {
+        defaults.dictionaryRepresentation()
+            .compactMap { key, value in
+                guard key.hasPrefix(iQualizeState.corruptBackupKeyPrefix), let data = value as? Data else {
+                    return nil
+                }
+                return (key, data)
+            }
+            .sorted { $0.key < $1.key }
+    }
 }

@@ -2,6 +2,22 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.59.0] - 2026-08-03
+
+### Added
+- Runtime capture failures now retain structured classifications for permission denial, helper exits, unavailable output devices, transient failures, and terminal protocol failures (#180).
+- The menu bar now shows lifecycle status, offers retry for recoverable failures, and links directly to Audio Capture settings when permission is required (#180).
+
+### Changed
+- The last meaningful capture failure now survives teardown and explicit disable, and clears only after a successful start (#180).
+
+## [0.58.2] - 2026-08-03
+
+### Fixed
+- Capture handshakes now validate the protocol version and shared-memory geometry before mapping, and mismatches fail cleanly (#175).
+- Corrupt persisted preset blobs are backed up and reported instead of being silently discarded (#176).
+- Settings mutations now use one owned store so interleaved writes do not clobber unrelated fields, and corrupt settings data is preserved instead of silently reset (#165, #177).
+
 ## [0.58.1] - 2026-08-03
 
 ### Fixed

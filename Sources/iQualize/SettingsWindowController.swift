@@ -6,6 +6,7 @@ import ServiceManagement
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let audioEngine: AudioEngine
     private let presetStore: PresetStore
+    private let settings: SettingsStore
     private weak var eqWindowController: EQWindowController?
 
     private var peakLimiterCheckbox: NSButton!
@@ -30,9 +31,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var linkGainCheckbox: NSButton!
     private var installCLIButton: NSButton!
 
-    init(audioEngine: AudioEngine, presetStore: PresetStore, eqWindowController: EQWindowController?) {
+    init(audioEngine: AudioEngine, presetStore: PresetStore, settings: SettingsStore, eqWindowController: EQWindowController?) {
         self.audioEngine = audioEngine
         self.presetStore = presetStore
+        self.settings = settings
         self.eqWindowController = eqWindowController
 
         let window = ShortcutAwareWindow(
@@ -61,7 +63,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
-        let state = iQualizeState.load()
+        let state = settings.state
         peakLimiterCheckbox.state = audioEngine.peakLimiter ? .on : .off
         maxGainPicker.selectItem(withTag: Int(audioEngine.maxGainDB))
         autoScaleCheckbox.state = state.autoScale ? .on : .off
@@ -92,7 +94,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func buildContent() -> NSView {
-        let state = iQualizeState.load()
+        let state = settings.state
 
         let mainStack = NSStackView()
         mainStack.orientation = .vertical
@@ -316,21 +318,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func togglePeakLimiter(_ sender: NSButton) {
         audioEngine.peakLimiter = sender.state == .on
-        var state = iQualizeState.load()
-        state.peakLimiter = audioEngine.peakLimiter
-        state.save()
+        settings.set(\.peakLimiter, audioEngine.peakLimiter)
         eqWindowController?.syncPeakLimiter(audioEngine.peakLimiter)
     }
 
     @objc private func toggleLinkGainGlobally(_ sender: NSButton) {
         let makeGlobal = sender.state == .on
-        var state = iQualizeState.load()
         if makeGlobal {
             // Per-preset -> Global: current per-preset gain becomes the new shared baseline.
-            state.inputGainDB = audioEngine.inputGainDB
-            state.outputGainDB = audioEngine.outputGainDB
-            state.linkGainGlobally = true
-            state.save()
+            settings.update {
+                $0.inputGainDB = audioEngine.inputGainDB
+                $0.outputGainDB = audioEngine.outputGainDB
+                $0.linkGainGlobally = true
+            }
             audioEngine.gainIsGlobal = true
         } else {
             // Global -> Per-preset: seed the active preset with the current global gain,
@@ -345,8 +345,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 presetStore.saveCustomPreset(preset)
             }
             audioEngine.activePreset = preset
-            state.linkGainGlobally = false
-            state.save()
+            settings.set(\.linkGainGlobally, false)
         }
         eqWindowController?.syncGainIsGlobal(audioEngine.gainIsGlobal)
         eqWindowController?.syncUIToPreset()
@@ -355,130 +354,98 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     @objc private func maxGainChanged(_ sender: NSPopUpButton) {
         guard let item = sender.selectedItem else { return }
         audioEngine.maxGainDB = Float(item.tag)
-        var state = iQualizeState.load()
-        state.maxGainDB = audioEngine.maxGainDB
-        state.save()
+        settings.set(\.maxGainDB, audioEngine.maxGainDB)
         eqWindowController?.syncMaxGain(audioEngine.maxGainDB)
     }
 
     @objc private func toggleAutoScale(_ sender: NSButton) {
         let on = sender.state == .on
         maxGainPicker.isEnabled = !on
-        var state = iQualizeState.load()
-        state.autoScale = on
-        state.save()
+        settings.set(\.autoScale, on)
         eqWindowController?.syncAutoScale(on)
     }
 
     @objc private func togglePreEqSpectrum(_ sender: NSButton) {
         let on = sender.state == .on
-        var state = iQualizeState.load()
-        state.preEqSpectrumEnabled = on
-        state.save()
+        settings.set(\.preEqSpectrumEnabled, on)
         eqWindowController?.syncPreEqSpectrum(on)
     }
 
     @objc private func togglePostEqSpectrum(_ sender: NSButton) {
         let on = sender.state == .on
-        var state = iQualizeState.load()
-        state.postEqSpectrumEnabled = on
-        state.save()
+        settings.set(\.postEqSpectrumEnabled, on)
         eqWindowController?.syncPostEqSpectrum(on)
     }
 
     @objc private func preEqLineColorChanged(_ sender: NSColorWell) {
         let srgb = sender.color.usingColorSpace(.sRGB) ?? sender.color
-        var state = iQualizeState.load()
-        state.preEqLineColorHex = srgb.srgbHexRGB
-        state.save()
+        settings.set(\.preEqLineColorHex, srgb.srgbHexRGB)
         eqWindowController?.syncPreEqLineColor(srgb)
     }
 
     @objc private func postEqLineColorChanged(_ sender: NSColorWell) {
         let srgb = sender.color.usingColorSpace(.sRGB) ?? sender.color
-        var state = iQualizeState.load()
-        state.postEqLineColorHex = srgb.srgbHexRGB
-        state.save()
+        settings.set(\.postEqLineColorHex, srgb.srgbHexRGB)
         eqWindowController?.syncPostEqLineColor(srgb)
     }
 
     @objc private func resetPreEqLineColor(_ sender: NSButton) {
-        var state = iQualizeState.load()
-        state.preEqLineColorHex = nil
-        state.save()
+        settings.set(\.preEqLineColorHex, nil)
         preEqLineColorWell.color = .systemCyan
         eqWindowController?.syncPreEqLineColor(.systemCyan)
     }
 
     @objc private func resetPostEqLineColor(_ sender: NSButton) {
-        var state = iQualizeState.load()
-        state.postEqLineColorHex = nil
-        state.save()
+        settings.set(\.postEqLineColorHex, nil)
         postEqLineColorWell.color = .systemOrange
         eqWindowController?.syncPostEqLineColor(.systemOrange)
     }
 
     @objc private func togglePreEqFill(_ sender: NSButton) {
         let on = sender.state == .on
-        var state = iQualizeState.load()
-        state.preEqFillEnabled = on
-        state.save()
+        settings.set(\.preEqFillEnabled, on)
         eqWindowController?.syncPreEqFillEnabled(on)
     }
 
     @objc private func togglePostEqFill(_ sender: NSButton) {
         let on = sender.state == .on
-        var state = iQualizeState.load()
-        state.postEqFillEnabled = on
-        state.save()
+        settings.set(\.postEqFillEnabled, on)
         eqWindowController?.syncPostEqFillEnabled(on)
     }
 
     @objc private func preEqFillColorChanged(_ sender: NSColorWell) {
         let srgb = sender.color.usingColorSpace(.sRGB) ?? sender.color
-        var state = iQualizeState.load()
-        state.preEqFillColorHex = srgb.srgbHexRGB
-        state.save()
+        settings.set(\.preEqFillColorHex, srgb.srgbHexRGB)
         eqWindowController?.syncPreEqFillColor(srgb)
     }
 
     @objc private func postEqFillColorChanged(_ sender: NSColorWell) {
         let srgb = sender.color.usingColorSpace(.sRGB) ?? sender.color
-        var state = iQualizeState.load()
-        state.postEqFillColorHex = srgb.srgbHexRGB
-        state.save()
+        settings.set(\.postEqFillColorHex, srgb.srgbHexRGB)
         eqWindowController?.syncPostEqFillColor(srgb)
     }
 
     @objc private func resetPreEqFillColor(_ sender: NSButton) {
-        var state = iQualizeState.load()
-        state.preEqFillColorHex = nil
-        state.save()
+        settings.set(\.preEqFillColorHex, nil)
         preEqFillColorWell.color = .systemCyan
         eqWindowController?.syncPreEqFillColor(.systemCyan)
     }
 
     @objc private func resetPostEqFillColor(_ sender: NSButton) {
-        var state = iQualizeState.load()
-        state.postEqFillColorHex = nil
-        state.save()
+        settings.set(\.postEqFillColorHex, nil)
         postEqFillColorWell.color = .systemOrange
         eqWindowController?.syncPostEqFillColor(.systemOrange)
     }
 
     @objc private func bandwidthModeChanged(_ sender: NSSegmentedControl) {
         let asQ = sender.selectedSegment == 0
-        var state = iQualizeState.load()
-        state.showBandwidthAsQ = asQ
-        state.save()
+        settings.set(\.showBandwidthAsQ, asQ)
         eqWindowController?.syncBandwidthMode(asQ: asQ)
     }
 
     @objc private func themeChanged(_ sender: NSSegmentedControl) {
         let preference = Self.themePreference(for: sender.selectedSegment)
-        var state = iQualizeState.load()
-        state.dreamTheme = preference.rawValue
-        state.save()
+        settings.set(\.dreamTheme, preference.rawValue)
         eqWindowController?.syncTheme(preference)
     }
 
@@ -500,11 +467,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func toggleHideFromDock(_ sender: NSButton) {
-        var state = iQualizeState.load()
-        state.hideFromDock = sender.state == .on
-        state.save()
-        NSApp.setActivationPolicy(state.hideFromDock ? .accessory : .regular)
-        if !state.hideFromDock {
+        let hide = sender.state == .on
+        settings.set(\.hideFromDock, hide)
+        NSApp.setActivationPolicy(hide ? .accessory : .regular)
+        if !hide {
             NSApp.activate(ignoringOtherApps: true)
         }
     }
@@ -523,9 +489,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             alert.runModal()
         }
         sender.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        var state = iQualizeState.load()
-        state.startAtLogin = SMAppService.mainApp.status == .enabled
-        state.save()
+        settings.set(\.startAtLogin, SMAppService.mainApp.status == .enabled)
     }
 
     // MARK: - Command Line Tool

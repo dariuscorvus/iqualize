@@ -203,4 +203,136 @@ final class PresetStoreTests: XCTestCase {
         store.unpinPreset(fromDeviceUID: "dev")
         XCTAssertNil(store.pinnedPresetID(forDeviceUID: "dev"))
     }
+
+    // MARK: - corrupt persisted data recovery (issue #176)
+
+    /// The five persisted blob keys, matching PresetStore's private constants.
+    private static let blobKeys = [
+        "com.iqualize.customPresets",
+        "com.iqualize.favoritePresetIDs",
+        "com.iqualize.hiddenBuiltInPresetIDs",
+        "com.iqualize.pinnedPresetsByDevice",
+        "com.iqualize.builtInOverrides",
+    ]
+
+    private func backupKeys(for key: String) -> [String] {
+        defaults.dictionaryRepresentation().keys
+            .filter { $0.hasPrefix("\(key).corrupt.") }
+            .sorted()
+    }
+
+    func testGarbageCustomPresetsPreservedUnderBackupKey() {
+        let garbage = Data("not json at all".utf8)
+        defaults.set(garbage, forKey: "com.iqualize.customPresets")
+
+        let store = makeStore()
+
+        XCTAssertTrue(store.customPresets.isEmpty)
+        XCTAssertEqual(store.loadFailures.count, 1)
+        let backups = backupKeys(for: "com.iqualize.customPresets")
+        XCTAssertEqual(backups.count, 1)
+        XCTAssertEqual(defaults.data(forKey: backups[0]), garbage)
+    }
+
+    func testTruncatedJSONPreservedUnderBackupKey() {
+        let truncated = Data("[{\"name\":".utf8)
+        defaults.set(truncated, forKey: "com.iqualize.customPresets")
+
+        let store = makeStore()
+
+        XCTAssertTrue(store.customPresets.isEmpty)
+        XCTAssertEqual(store.loadFailures.count, 1)
+        let backups = backupKeys(for: "com.iqualize.customPresets")
+        XCTAssertEqual(backups.count, 1)
+        XCTAssertEqual(defaults.data(forKey: backups[0]), truncated)
+    }
+
+    func testLaterSaveDoesNotTouchBackup() {
+        let garbage = Data("garbage".utf8)
+        defaults.set(garbage, forKey: "com.iqualize.customPresets")
+        let store = makeStore()
+        let backups = backupKeys(for: "com.iqualize.customPresets")
+        XCTAssertEqual(backups.count, 1)
+
+        store.saveCustomPreset(makePreset(name: "New After Corruption"))
+
+        // Backup bytes untouched, primary key now holds the new valid array.
+        XCTAssertEqual(defaults.data(forKey: backups[0]), garbage)
+        XCTAssertEqual(backupKeys(for: "com.iqualize.customPresets"), backups)
+        let reloaded = makeStore()
+        XCTAssertEqual(reloaded.customPresets.map(\.name), ["New After Corruption"])
+    }
+
+    func testCascadingSaveDoesNotClobberBackupOfOtherKey() {
+        // deleteCustomPreset persists favorites and pins too — a corrupt favorites
+        // blob must already be backed up before that cascade overwrites the key.
+        let garbage = Data("]}[".utf8)
+        defaults.set(garbage, forKey: "com.iqualize.favoritePresetIDs")
+        let store = makeStore()
+        let preset = makePreset(name: "Doomed")
+        store.saveCustomPreset(preset)
+
+        store.deleteCustomPreset(id: preset.id)
+
+        let backups = backupKeys(for: "com.iqualize.favoritePresetIDs")
+        XCTAssertEqual(backups.count, 1)
+        XCTAssertEqual(defaults.data(forKey: backups[0]), garbage)
+    }
+
+    func testValidDataLoadsUnchangedWithNoFailuresAndNoBackups() throws {
+        let preset = makePreset(name: "Valid")
+        defaults.set(try JSONEncoder().encode([preset]), forKey: "com.iqualize.customPresets")
+        defaults.set(try JSONEncoder().encode([preset.id]), forKey: "com.iqualize.favoritePresetIDs")
+        defaults.set(try JSONEncoder().encode([EQPresetData.bassBoost.id]), forKey: "com.iqualize.hiddenBuiltInPresetIDs")
+        defaults.set(try JSONEncoder().encode(["dev": preset.id]), forKey: "com.iqualize.pinnedPresetsByDevice")
+        var edited = EQPresetData.flat
+        edited.name = "Flat (edited)"
+        defaults.set(try JSONEncoder().encode([EQPresetData.flat.id: edited]), forKey: "com.iqualize.builtInOverrides")
+
+        let store = makeStore()
+
+        XCTAssertTrue(store.loadFailures.isEmpty)
+        XCTAssertEqual(store.customPresets.map(\.name), ["Valid"])
+        XCTAssertEqual(store.favoritePresetIDs, [preset.id])
+        XCTAssertEqual(store.hiddenBuiltInPresetIDs, [EQPresetData.bassBoost.id])
+        XCTAssertEqual(store.pinnedPresetIDByDeviceUID, ["dev": preset.id])
+        XCTAssertEqual(store.builtInOverrides[EQPresetData.flat.id]?.name, "Flat (edited)")
+        for key in Self.blobKeys {
+            XCTAssertTrue(backupKeys(for: key).isEmpty, "unexpected backup for \(key)")
+        }
+    }
+
+    func testEachBlobBackedUpIndependently() {
+        let garbage = Data("\u{FF}\u{FE}broken".utf8)
+        for corruptKey in Self.blobKeys {
+            defaults.removePersistentDomain(forName: suiteName)
+            defaults.set(garbage, forKey: corruptKey)
+
+            let store = makeStore()
+
+            XCTAssertEqual(store.loadFailures.count, 1, "one failure expected for \(corruptKey)")
+            let backups = backupKeys(for: corruptKey)
+            XCTAssertEqual(backups.count, 1, "one backup expected for \(corruptKey)")
+            XCTAssertEqual(defaults.data(forKey: backups[0]), garbage)
+            for other in Self.blobKeys where other != corruptKey {
+                XCTAssertTrue(backupKeys(for: other).isEmpty, "no backup expected for \(other)")
+            }
+        }
+    }
+
+    func testAllBlobsCorruptReportsFiveFailures() {
+        for key in Self.blobKeys {
+            defaults.set(Data("junk-\(key)".utf8), forKey: key)
+        }
+
+        let store = makeStore()
+
+        XCTAssertEqual(store.loadFailures.count, 5)
+        for key in Self.blobKeys {
+            XCTAssertEqual(backupKeys(for: key).count, 1, "backup missing for \(key)")
+        }
+        // Store still functions on defaults.
+        XCTAssertTrue(store.customPresets.isEmpty)
+        XCTAssertFalse(store.allPresets.isEmpty)
+    }
 }

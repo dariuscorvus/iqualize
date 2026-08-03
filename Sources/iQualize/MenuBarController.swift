@@ -2,20 +2,28 @@ import AppKit
 import IQControlProtocol
 
 @available(macOS 14.2, *)
+private extension NSUserInterfaceItemIdentifier {
+    static let iqualizeRuntimeStatus = NSUserInterfaceItemIdentifier("com.iqualize.menu.runtime-status")
+    static let iqualizeRetryCapture = NSUserInterfaceItemIdentifier("com.iqualize.menu.retry-capture")
+    static let iqualizePermissionSettings = NSUserInterfaceItemIdentifier("com.iqualize.menu.permission-settings")
+}
+
+@available(macOS 14.2, *)
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     private var statusItem: NSStatusItem!
     private let audioEngine: AudioEngine
     private let presetStore: PresetStore
+    private let settings: SettingsStore
     private var eqWindowController: EQWindowController?
     private var settingsWindowController: SettingsWindowController?
     private var helpWindowController: HelpWindowController?
 
-    init(audioEngine: AudioEngine, presetStore: PresetStore) {
+    init(audioEngine: AudioEngine, presetStore: PresetStore, settings: SettingsStore) {
         self.audioEngine = audioEngine
         self.presetStore = presetStore
+        self.settings = settings
         super.init()
-        var state = iQualizeState.load()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
@@ -32,40 +40,41 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
         audioEngine.pinnedPresetProvider = { [weak presetStore] uid in
             presetStore?.pinnedPreset(forDeviceUID: uid)
         }
+        audioEngine.onPinnedPresetApplied = { [weak self] id in
+            self?.settings.set(\.selectedPresetID, id)
+        }
 
         // Restore saved state — a device pin for the current output takes priority over
         // the last-selected preset, since it's an explicit user choice. Capture starts per
         // the persisted captureEnabled flag (defaults true, so fresh/existing installs
         // still always start; only an explicit `iqualize capture off` persists false).
-        audioEngine.gainIsGlobal = state.linkGainGlobally
+        audioEngine.gainIsGlobal = settings.state.linkGainGlobally
         let startupPreset = audioEngine.outputDeviceUID
             .flatMap { presetStore.pinnedPreset(forDeviceUID: $0) }
-            ?? presetStore.preset(for: state.selectedPresetID)
+            ?? presetStore.preset(for: settings.state.selectedPresetID)
         if let preset = startupPreset {
             audioEngine.activePreset = preset
-            state.selectedPresetID = preset.id
-            state.save()
+            settings.set(\.selectedPresetID, preset.id)
         } else {
             audioEngine.activePreset = .flat
-            state.selectedPresetID = EQPresetData.flat.id
-            state.save()
+            settings.set(\.selectedPresetID, EQPresetData.flat.id)
         }
-        audioEngine.peakLimiter = state.peakLimiter
-        audioEngine.maxGainDB = state.maxGainDB
-        audioEngine.bypassed = state.bypassed
-        audioEngine.balance = state.balance
-        if state.linkGainGlobally {
-            audioEngine.inputGainDB = state.inputGainDB
-            audioEngine.outputGainDB = state.outputGainDB
+        audioEngine.peakLimiter = settings.state.peakLimiter
+        audioEngine.maxGainDB = settings.state.maxGainDB
+        audioEngine.bypassed = settings.state.bypassed
+        audioEngine.balance = settings.state.balance
+        if settings.state.linkGainGlobally {
+            audioEngine.inputGainDB = settings.state.inputGainDB
+            audioEngine.outputGainDB = settings.state.outputGainDB
         }
-        let captureEnabled = state.captureEnabled
+        let captureEnabled = settings.state.captureEnabled
         Task { @MainActor in
             await audioEngine.setEnabled(captureEnabled)
         }
         updateIcon()
 
         // Restore EQ window if it was open when the app last quit
-        if state.windowOpen {
+        if settings.state.windowOpen {
             openEQWindow()
         }
     }
@@ -158,12 +167,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
             menu.addItem(pinItem)
         }
 
-        // Error display
-        if let error = audioEngine.error {
-            let errorItem = NSMenuItem(title: "⚠ \(error)", action: nil, keyEquivalent: "")
-            errorItem.isEnabled = false
-            menu.addItem(errorItem)
-        }
+        addRuntimeStatusSection(to: menu)
 
         menu.addItem(.separator())
 
@@ -220,9 +224,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
         let proceed = { [weak self] in
             guard let self, let preset = self.presetStore.preset(for: id) else { return }
             self.audioEngine.activePreset = preset
-            var s = iQualizeState.load()
-            s.selectedPresetID = preset.id
-            s.save()
+            self.settings.set(\.selectedPresetID, preset.id)
             self.eqWindowController?.syncUIToPreset()
             didApply = true
         }
@@ -241,7 +243,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     @objc private func openSettings(_ sender: NSMenuItem) {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                audioEngine: audioEngine, presetStore: presetStore, eqWindowController: eqWindowController)
+                audioEngine: audioEngine, presetStore: presetStore, settings: settings, eqWindowController: eqWindowController)
         }
         settingsWindowController?.updateEQWindowController(eqWindowController)
         settingsWindowController?.showWindow(nil)
@@ -250,7 +252,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
 
     func openEQWindow() {
         if eqWindowController == nil {
-            eqWindowController = EQWindowController(audioEngine: audioEngine, presetStore: presetStore)
+            eqWindowController = EQWindowController(audioEngine: audioEngine, presetStore: presetStore, settings: settings)
             eqWindowController?.onOpenSettings = { [weak self] in
                 self?.openSettings(NSMenuItem())
             }
@@ -268,25 +270,77 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
         eqWindowController?.showWindow(nil)
         settingsWindowController?.updateEQWindowController(eqWindowController)
         NSApp.activate(ignoringOtherApps: true)
-        var s = iQualizeState.load()
-        s.windowOpen = true
-        s.save()
+        settings.set(\.windowOpen, true)
     }
 
     @objc private func windowDidClose(_ notification: Notification) {
-        var s = iQualizeState.load()
-        s.windowOpen = false
-        s.save()
+        settings.set(\.windowOpen, false)
     }
 
     @objc private func toggleBypass(_ sender: NSMenuItem) {
         toggleBypassFromMenu()
     }
 
+    private func runtimePresentation() -> MenuBarRuntimePresentation {
+        MenuBarRuntimePresentation.make(
+            lifecycleState: audioEngine.lifecycleState,
+            userEnabled: audioEngine.userEnabled,
+            bypassed: audioEngine.bypassed,
+            lastFailure: audioEngine.lastFailure
+        )
+    }
+
+    private func addRuntimeStatusSection(to menu: NSMenu) {
+        let presentation = runtimePresentation()
+
+        let statusItem = NSMenuItem(title: presentation.title, action: nil, keyEquivalent: "")
+        statusItem.identifier = .iqualizeRuntimeStatus
+        statusItem.isEnabled = false
+        statusItem.toolTip = presentation.tooltip
+        statusItem.image = runtimeImage(named: presentation.symbolName, accessibilityDescription: presentation.accessibilityLabel)
+        menu.addItem(statusItem)
+
+        if presentation.showsRetryCapture {
+            let retryItem = NSMenuItem(title: "Retry Capture", action: #selector(retryCapture(_:)), keyEquivalent: "")
+            retryItem.identifier = .iqualizeRetryCapture
+            retryItem.target = self
+            menu.addItem(retryItem)
+        }
+
+        if presentation.showsPermissionSettings {
+            let settingsItem = NSMenuItem(
+                title: "Open Audio Capture Settings",
+                action: #selector(openAudioCaptureSettings(_:)),
+                keyEquivalent: ""
+            )
+            settingsItem.identifier = .iqualizePermissionSettings
+            settingsItem.target = self
+            menu.addItem(settingsItem)
+        }
+    }
+
+    @objc private func retryCapture(_ sender: NSMenuItem) {
+        statusItem.menu?.cancelTracking()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.audioEngine.setEnabled(true)
+            self.updateIcon()
+        }
+    }
+
+    @objc private func openAudioCaptureSettings(_ sender: NSMenuItem) {
+        statusItem.menu?.cancelTracking()
+        let specificURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")!
+        let fallbackURL = URL(string: "x-apple.systempreferences:")!
+        if !NSWorkspace.shared.open(specificURL) {
+            NSWorkspace.shared.open(fallbackURL)
+        }
+    }
+
     func showSettings() {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                audioEngine: audioEngine, presetStore: presetStore, eqWindowController: eqWindowController)
+                audioEngine: audioEngine, presetStore: presetStore, settings: settings, eqWindowController: eqWindowController)
         }
         settingsWindowController?.updateEQWindowController(eqWindowController)
         settingsWindowController?.showWindow(nil)
@@ -301,9 +355,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     /// toggle and the CLI.
     func setBypassed(_ bypassed: Bool) {
         audioEngine.bypassed = bypassed
-        var s = iQualizeState.load()
-        s.bypassed = bypassed
-        s.save()
+        settings.set(\.bypassed, bypassed)
         updateIcon()
         eqWindowController?.syncBypass(bypassed)
         settingsWindowController?.syncBypass(bypassed)
@@ -326,17 +378,13 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     func setInputGain(_ db: Float) {
         if audioEngine.gainIsGlobal {
             audioEngine.inputGainDB = db
-            var s = iQualizeState.load()
-            s.inputGainDB = db
-            s.save()
+            settings.set(\.inputGainDB, db)
         } else {
             var preset = audioEngine.activePreset
             preset.inputGainDB = db
             audioEngine.activePreset = preset
             persistPreset(preset)
-            var s = iQualizeState.load()
-            s.selectedPresetID = preset.id
-            s.save()
+            settings.set(\.selectedPresetID, preset.id)
         }
         eqWindowController?.syncUIToPreset()
     }
@@ -345,17 +393,13 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     func setOutputGain(_ db: Float) {
         if audioEngine.gainIsGlobal {
             audioEngine.outputGainDB = db
-            var s = iQualizeState.load()
-            s.outputGainDB = db
-            s.save()
+            settings.set(\.outputGainDB, db)
         } else {
             var preset = audioEngine.activePreset
             preset.outputGainDB = db
             audioEngine.activePreset = preset
             persistPreset(preset)
-            var s = iQualizeState.load()
-            s.selectedPresetID = preset.id
-            s.save()
+            settings.set(\.selectedPresetID, preset.id)
         }
         eqWindowController?.syncUIToPreset()
     }
@@ -365,17 +409,13 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     func setBalance(_ value: Float) {
         let clamped = min(max(value, -1), 1)
         audioEngine.balance = clamped
-        var s = iQualizeState.load()
-        s.balance = clamped
-        s.save()
+        settings.set(\.balance, clamped)
         eqWindowController?.syncBalance(clamped)
     }
 
     func setPeakLimiter(_ enabled: Bool) {
         audioEngine.peakLimiter = enabled
-        var s = iQualizeState.load()
-        s.peakLimiter = enabled
-        s.save()
+        settings.set(\.peakLimiter, enabled)
         eqWindowController?.syncPeakLimiter(enabled)
     }
 
@@ -390,12 +430,12 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     /// active preset's gain in place on the global -> per-preset transition so it survives
     /// a relaunch.
     func setGainIsGlobal(_ global: Bool) {
-        var s = iQualizeState.load()
         if global {
-            s.inputGainDB = audioEngine.inputGainDB
-            s.outputGainDB = audioEngine.outputGainDB
-            s.linkGainGlobally = true
-            s.save()
+            settings.update {
+                $0.inputGainDB = audioEngine.inputGainDB
+                $0.outputGainDB = audioEngine.outputGainDB
+                $0.linkGainGlobally = true
+            }
             audioEngine.gainIsGlobal = true
         } else {
             audioEngine.gainIsGlobal = false
@@ -404,8 +444,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
             preset.outputGainDB = audioEngine.outputGainDB
             persistPreset(preset)
             audioEngine.activePreset = preset
-            s.linkGainGlobally = false
-            s.save()
+            settings.set(\.linkGainGlobally, false)
         }
         eqWindowController?.syncGainIsGlobal(audioEngine.gainIsGlobal)
         eqWindowController?.syncUIToPreset()
@@ -419,41 +458,35 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     }
 
     // preEqSpectrumEnabled/postEqSpectrumEnabled live only in iQualizeState, not on
-    // AudioEngine — the toggle variants read the current value from persisted state
-    // rather than from audioEngine, unlike peakLimiter/gainIsGlobal/capture.
+    // AudioEngine — the toggle variants read the current value from the settings
+    // store rather than from audioEngine, unlike peakLimiter/gainIsGlobal/capture.
     func setPreEqSpectrum(_ enabled: Bool) {
-        var s = iQualizeState.load()
-        s.preEqSpectrumEnabled = enabled
-        s.save()
+        settings.set(\.preEqSpectrumEnabled, enabled)
         eqWindowController?.syncPreEqSpectrum(enabled)
     }
 
     @discardableResult
     func togglePreEqSpectrum() -> Bool {
-        let newValue = !iQualizeState.load().preEqSpectrumEnabled
+        let newValue = !settings.state.preEqSpectrumEnabled
         setPreEqSpectrum(newValue)
         return newValue
     }
 
     func setPostEqSpectrum(_ enabled: Bool) {
-        var s = iQualizeState.load()
-        s.postEqSpectrumEnabled = enabled
-        s.save()
+        settings.set(\.postEqSpectrumEnabled, enabled)
         eqWindowController?.syncPostEqSpectrum(enabled)
     }
 
     @discardableResult
     func togglePostEqSpectrum() -> Bool {
-        let newValue = !iQualizeState.load().postEqSpectrumEnabled
+        let newValue = !settings.state.postEqSpectrumEnabled
         setPostEqSpectrum(newValue)
         return newValue
     }
 
     func setCapture(_ enabled: Bool) async {
         await audioEngine.setEnabled(enabled)
-        var s = iQualizeState.load()
-        s.captureEnabled = enabled
-        s.save()
+        settings.set(\.captureEnabled, enabled)
         updateIcon()
     }
 
@@ -510,9 +543,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     private func persistBandMutation(_ preset: EQPresetData) {
         audioEngine.activePreset = preset
         persistPreset(preset)
-        var s = iQualizeState.load()
-        s.selectedPresetID = preset.id
-        s.save()
+        settings.set(\.selectedPresetID, preset.id)
         eqWindowController?.syncUIToPreset()
     }
 
@@ -938,8 +969,8 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
             outputDeviceName: audioEngine.outputDeviceName,
             isRunning: audioEngine.isRunning,
             peakLimiter: audioEngine.peakLimiter,
-            preEqSpectrumEnabled: iQualizeState.load().preEqSpectrumEnabled,
-            postEqSpectrumEnabled: iQualizeState.load().postEqSpectrumEnabled,
+            preEqSpectrumEnabled: settings.state.preEqSpectrumEnabled,
+            postEqSpectrumEnabled: settings.state.postEqSpectrumEnabled,
             appVersion: appVersion,
             gitCommit: appGitCommit,
             captureFillFrames: capture?.fillFrames,
@@ -1003,13 +1034,21 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     private func updateIcon() {
         if let button = statusItem.button {
             button.title = ""
-            let symbolName = audioEngine.bypassed ? "slider.vertical.3" : "slider.vertical.3"
-            if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "iQualize") {
-                let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-                button.image = image.withSymbolConfiguration(config)
-                button.image?.isTemplate = true
-            }
-            button.appearsDisabled = !audioEngine.isRunning || audioEngine.bypassed
+            let presentation = runtimePresentation()
+            button.image = runtimeImage(named: presentation.symbolName, accessibilityDescription: presentation.accessibilityLabel)
+            button.appearsDisabled = presentation.appearsDisabled
+            button.toolTip = presentation.tooltip
+            button.setAccessibilityLabel(presentation.accessibilityLabel)
         }
+    }
+
+    private func runtimeImage(named symbolName: String, accessibilityDescription: String) -> NSImage? {
+        guard let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityDescription) else {
+            return nil
+        }
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        let configuredImage = image.withSymbolConfiguration(config) ?? image
+        configuredImage.isTemplate = true
+        return configuredImage
     }
 }

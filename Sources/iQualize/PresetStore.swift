@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+import os.log
+
+private let storeLog = OSLog(subsystem: "com.iqualize", category: "presets")
 
 @available(macOS 14.2, *)
 @Observable
@@ -16,6 +19,11 @@ final class PresetStore {
     /// (stable) id. A built-in with no entry here is still exactly what shipped. Independent
     /// of `hiddenBuiltInPresetIDs` — a built-in can be hidden, overridden, both, or neither.
     private(set) var builtInOverrides: [UUID: EQPresetData] = [:]
+
+    /// Human-readable descriptions of persisted blobs that failed to decode at load time.
+    /// Empty when everything loaded cleanly. The corrupt raw data is preserved under a
+    /// timestamped backup key (see `backUpCorruptBlob`) — never silently discarded.
+    private(set) var loadFailures: [String] = []
 
     var allPresets: [EQPresetData] {
         EQPresetData.builtInPresets
@@ -171,26 +179,57 @@ final class PresetStore {
     }
 
     private func load() {
-        if let data = defaults.data(forKey: Self.key),
-           let presets = try? JSONDecoder().decode([EQPresetData].self, from: data) {
+        if let presets = loadBlob([EQPresetData].self, key: Self.key, describedAs: "Custom presets") {
             customPresets = presets
         }
-        if let data = defaults.data(forKey: Self.favoritesKey),
-           let ids = try? JSONDecoder().decode([UUID].self, from: data) {
+        if let ids = loadBlob([UUID].self, key: Self.favoritesKey, describedAs: "Favorite presets") {
             favoritePresetIDs = ids
         }
-        if let data = defaults.data(forKey: Self.hiddenBuiltInsKey),
-           let ids = try? JSONDecoder().decode([UUID].self, from: data) {
+        if let ids = loadBlob([UUID].self, key: Self.hiddenBuiltInsKey, describedAs: "Hidden built-in presets") {
             hiddenBuiltInPresetIDs = ids
         }
-        if let data = defaults.data(forKey: Self.devicePinsKey),
-           let pins = try? JSONDecoder().decode([String: UUID].self, from: data) {
+        if let pins = loadBlob([String: UUID].self, key: Self.devicePinsKey, describedAs: "Per-device preset pins") {
             pinnedPresetIDByDeviceUID = pins
         }
-        if let data = defaults.data(forKey: Self.builtInOverridesKey),
-           let overrides = try? JSONDecoder().decode([UUID: EQPresetData].self, from: data) {
+        if let overrides = loadBlob([UUID: EQPresetData].self, key: Self.builtInOverridesKey, describedAs: "Built-in preset edits") {
             builtInOverrides = overrides
         }
+    }
+
+    /// Decodes one persisted blob. A missing key is normal (fresh install) and returns nil
+    /// silently. A decode failure preserves the raw bytes under a timestamped backup key,
+    /// logs, records a user-facing message in `loadFailures`, and returns nil so the caller
+    /// keeps its default — the damaged original is never the only copy when a later
+    /// `persist*()` overwrites the primary key.
+    private func loadBlob<T: Decodable>(_ type: T.Type, key: String, describedAs description: String) -> T? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            let backupKey = backUpCorruptBlob(data, key: key)
+            os_log(.error, log: storeLog,
+                   "failed to decode %{public}@ (%{public}@): %{public}@ — raw data preserved under %{public}@",
+                   key, description, String(describing: error), backupKey)
+            loadFailures.append("\(description) couldn't be read — original data preserved")
+            return nil
+        }
+    }
+
+    /// Writes the corrupt raw bytes under `<key>.corrupt.<ISO8601 timestamp>`. Backup keys
+    /// are disjoint from every `persist*()` key, so later saves can never clobber them.
+    /// Returns the backup key used.
+    private func backUpCorruptBlob(_ data: Data, key: String) -> String {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        var backupKey = "\(key).corrupt.\(timestamp)"
+        // A stored object at the candidate key means an earlier corruption was already
+        // preserved this second — suffix rather than overwrite an existing backup.
+        var n = 2
+        while defaults.object(forKey: backupKey) != nil {
+            backupKey = "\(key).corrupt.\(timestamp).\(n)"
+            n += 1
+        }
+        defaults.set(data, forKey: backupKey)
+        return backupKey
     }
 
     private func persist() {
