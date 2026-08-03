@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.58.1] - 2026-08-03
+
+### Fixed
+- Clearing the OPRA browser search now clears the stale EQ profile list from the detail pane (#195).
+
 ## [0.58.0] - 2026-08-02
 
 ### Changed
