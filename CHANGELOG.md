@@ -5,13 +5,10 @@ All notable changes to iQualize will be documented in this file.
 ## [0.60.0] - 2026-08-03
 
 ### Added
-- Runtime status telemetry now has focused regression coverage for lifecycle, stream format, output device, last failure, and capture-helper restart updates.
+- Runtime diagnostics now report precise capture, render, and output-device telemetry across the shared CLI and UI availability surfaces.
 
 ### Changed
-- Prepared the M5 release metadata for the 0.60.0 minor release.
-
-### Fixed
-- Active stream format clearing is now covered to ensure output-device telemetry and the last meaningful failure are preserved.
+- Availability reporting now preserves unavailable values explicitly and keeps diagnostics read-only, so status inspection does not mutate capture state.
 
 ## [0.59.0] - 2026-08-03
 
