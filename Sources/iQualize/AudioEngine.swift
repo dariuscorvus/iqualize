@@ -312,6 +312,7 @@ final class AudioEngine {
     private(set) var lifecycleHistory: [AudioLifecycleTransition] = []
     private(set) var outputDeviceName = "Unknown"
     private(set) var outputDeviceUID: String?
+    private(set) var runtimeStatus: AudioRuntimeStatus = .initial
     private(set) var lastFailure: AudioRuntimeFailure?
     /// Unexpected helper terminations since the app launched. This is kept
     /// outside CaptureClient because a recovery creates a fresh client.
@@ -444,13 +445,7 @@ final class AudioEngine {
     }
 
     init() {
-        do {
-            let deviceID = try getDefaultOutputDeviceID()
-            outputDeviceName = try getDeviceName(deviceID)
-            outputDeviceUID = try? getDeviceUID(deviceID)
-        } catch {
-            outputDeviceName = "Unknown"
-        }
+        refreshOutputDeviceTelemetry()
         installDeviceChangeListener()
 
         lifecycleCoordinator = AudioLifecycleCoordinator(
@@ -472,6 +467,7 @@ final class AudioEngine {
             },
             publishFailure: { @MainActor [weak self] failure in
                 self?.lastFailure = failure
+                self?.publishRuntimeStatus()
             }
         )
     }
@@ -493,9 +489,7 @@ final class AudioEngine {
     // MARK: - Start / Stop
 
     private func startGraph() throws {
-        let outputDeviceID = try getDefaultOutputDeviceID()
-        outputDeviceName = try getDeviceName(outputDeviceID)
-        outputDeviceUID = try? getDeviceUID(outputDeviceID)
+        refreshOutputDeviceTelemetry()
 
         // 1. Launch the capture helper — it owns the CATap, tap-only aggregate,
         //    and IOProc in a separate process. We just consume its shared-memory
@@ -506,6 +500,7 @@ final class AudioEngine {
         client.onUnexpectedTermination = { [weak self] in
             guard let self else { return }
             self.captureHelperRestartCount &+= 1
+            self.publishRuntimeStatus()
             Task { @MainActor in
                 guard let lifecycleCoordinator = self.lifecycleCoordinator else { return }
                 await lifecycleCoordinator.helperTerminated()
@@ -519,6 +514,9 @@ final class AudioEngine {
         let channels = client.channels
         self.outputSampleRate = sampleRate
         renderChannelCount = channels
+        let captureFormat = AudioRuntimeStatus.StreamFormat(sampleRate: sampleRate, channelCount: channels)
+        let renderFormat = AudioRuntimeStatus.StreamFormat(sampleRate: sampleRate, channelCount: channels)
+        publishRuntimeStatus(captureFormat: captureFormat, renderFormat: renderFormat, dspSampleRate: sampleRate)
 
         os_log(.default, log: appLog,
                "capture helper sr: %{public}.0f  ch: %{public}u  output: %{public}@",
@@ -692,7 +690,45 @@ final class AudioEngine {
         userEnabled = snapshot.userEnabled
         lifecycleHistory = snapshot.history
         isRunning = snapshot.state == .running
+        publishRuntimeStatus()
         onStateChange?()
+    }
+
+    private func refreshOutputDeviceTelemetry() {
+        do {
+            let outputDevice = try getDefaultOutputDevice()
+            outputDeviceName = outputDevice.name
+            outputDeviceUID = outputDevice.uid
+            runtimeStatus = runtimeStatus.updatingOutputDevice(outputDevice)
+        } catch {
+            outputDeviceName = "Unknown"
+            outputDeviceUID = nil
+            runtimeStatus = runtimeStatus.updatingOutputDevice(nil)
+        }
+    }
+
+    private func publishRuntimeStatus(
+        captureFormat: AudioRuntimeStatus.StreamFormat? = nil,
+        renderFormat: AudioRuntimeStatus.StreamFormat? = nil,
+        dspSampleRate: Double? = nil,
+        clearActiveStreamFormats: Bool = false
+    ) {
+        var next = runtimeStatus.updatingLifecycle(
+            state: lifecycleState,
+            userEnabled: userEnabled,
+            lastFailure: lastFailure,
+            captureHelperRestartCount: captureHelperRestartCount
+        )
+        if clearActiveStreamFormats {
+            next = next.clearingActiveStreamFormats()
+        } else if captureFormat != nil || renderFormat != nil || dspSampleRate != nil {
+            next = next.updatingFormats(
+                captureFormat: captureFormat ?? next.captureFormat,
+                renderFormat: renderFormat ?? next.renderFormat,
+                dspSampleRate: dspSampleRate ?? next.dspSampleRate
+            )
+        }
+        runtimeStatus = next
     }
 
     /// Releases every resource acquired by start(), including resources from a
@@ -701,6 +737,7 @@ final class AudioEngine {
     /// exception when removeTap(onBus:) is called on an empty bus.
     private func teardown() {
         isRunning = false
+        publishRuntimeStatus(clearActiveStreamFormats: true)
 
         if let configChangeObserver {
             NotificationCenter.default.removeObserver(configChangeObserver)
@@ -899,19 +936,13 @@ final class AudioEngine {
     }
 
     private func handleDeviceChange() {
-        var outputDeviceChanged = false
-        if let deviceID = try? getDefaultOutputDeviceID() {
-            let previousUID = outputDeviceUID
-            if let name = try? getDeviceName(deviceID) {
-                outputDeviceName = name
-            }
-            let uid = try? getDeviceUID(deviceID)
-            outputDeviceUID = uid
-            outputDeviceChanged = defaultOutputDeviceChanged(previousUID: previousUID, currentUID: uid)
-            if outputDeviceChanged, let uid, let pinned = pinnedPresetProvider?(uid) {
-                activePreset = pinned
-                onPinnedPresetApplied?(pinned.id)
-            }
+        let previousUID = outputDeviceUID
+        refreshOutputDeviceTelemetry()
+        let uid = outputDeviceUID
+        let outputDeviceChanged = defaultOutputDeviceChanged(previousUID: previousUID, currentUID: uid)
+        if outputDeviceChanged, let uid, let pinned = pinnedPresetProvider?(uid) {
+            activePreset = pinned
+            onPinnedPresetApplied?(pinned.id)
         }
 
         guard outputDeviceChanged else {
