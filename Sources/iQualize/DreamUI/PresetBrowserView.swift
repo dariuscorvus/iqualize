@@ -49,15 +49,16 @@ struct PresetBrowserView: View {
         OPRASearch.filter(products, matching: query)
     }
 
-    /// The selection to keep after `query` changes: the current `selection` when it still
-    /// appears in the filtered results, otherwise `nil`. Clearing a query that still contains
-    /// the selection preserves it (#155).
+    /// The selection to keep after `query` changes: a non-empty query keeps the current
+    /// `selection` when it still appears in the filtered results, otherwise `nil`. Clearing the
+    /// query ends the active search context, so it also clears the detail selection (#195).
     static func validatedSelection(
         _ selection: String?,
         in products: [OPRAProductEntry],
         matching query: String
     ) -> String? {
         guard let selection else { return nil }
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return filter(products, matching: query).contains { $0.id == selection } ? selection : nil
     }
 
@@ -116,7 +117,7 @@ struct PresetBrowserView: View {
         // Editing the search can filter the selected product out of the sidebar. The
         // detail pane derives from `filteredProducts`, so a dropped selection already
         // falls back to the placeholder, but clear the id too so the selection doesn't
-        // silently reappear when the query is cleared again (#155).
+        // silently reappear when the query changes again (#155, #195).
         .onChange(of: searchText) {
             selectedProductID = Self.validatedSelection(
                 selectedProductID, in: products, matching: searchText)

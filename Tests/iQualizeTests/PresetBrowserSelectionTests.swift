@@ -30,11 +30,18 @@ final class PresetBrowserSelectionTests: XCTestCase {
         XCTAssertEqual(result, "sony-1000")
     }
 
-    // Clearing the query preserves a still-valid selection rather than discarding it.
-    func testSelectionRetainedWhenQueryCleared() {
+    // Clearing the query ends the active search context and clears the detail selection.
+    func testSelectionClearedWhenQueryCleared() {
         let result = PresetBrowserView.validatedSelection(
             "sony-1000", in: catalog, matching: "")
-        XCTAssertEqual(result, "sony-1000")
+        XCTAssertNil(result)
+    }
+
+    // Whitespace-only queries are treated like an empty search.
+    func testSelectionClearedWhenQueryContainsOnlyWhitespace() {
+        let result = PresetBrowserView.validatedSelection(
+            "sony-1000", in: catalog, matching: "   ")
+        XCTAssertNil(result)
     }
 
     // A nil selection stays nil regardless of query.
