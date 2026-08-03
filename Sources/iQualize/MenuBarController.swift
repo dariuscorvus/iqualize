@@ -18,6 +18,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     private var eqWindowController: EQWindowController?
     private var settingsWindowController: SettingsWindowController?
     private var helpWindowController: HelpWindowController?
+    private var diagnosticsWindowController: DiagnosticsWindowController?
 
     init(audioEngine: AudioEngine, presetStore: PresetStore, settings: SettingsStore) {
         self.audioEngine = audioEngine
@@ -33,7 +34,9 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
 
         // Rebuild menu on device changes
         audioEngine.onStateChange = { [weak self] in
-            self?.updateIcon()
+            guard let self else { return }
+            self.updateIcon()
+            self.diagnosticsWindowController?.refresh()
         }
 
         // Recall the preset pinned to a device the moment we switch to it.
@@ -106,6 +109,11 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
         settingsItem.keyEquivalentModifierMask = [.command]
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let diagnosticsItem = NSMenuItem(title: "Diagnostics…",
+                                         action: #selector(openDiagnostics(_:)), keyEquivalent: "")
+        diagnosticsItem.target = self
+        menu.addItem(diagnosticsItem)
 
         menu.addItem(.separator())
 
@@ -248,6 +256,19 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
         settingsWindowController?.updateEQWindowController(eqWindowController)
         settingsWindowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func openDiagnostics(_ sender: NSMenuItem) {
+        if diagnosticsWindowController == nil {
+            diagnosticsWindowController = DiagnosticsWindowController(audioEngine: audioEngine)
+        }
+        diagnosticsWindowController?.refresh()
+        diagnosticsWindowController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func showDiagnostics() {
+        openDiagnostics(NSMenuItem())
     }
 
     func openEQWindow() {
@@ -957,8 +978,9 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     }
 
     func statusSnapshot() -> CLIStatusPayload {
-        let capture = audioEngine.captureTelemetry()
-        let runtime = audioEngine.runtimeStatus
+        let diagnostics = audioEngine.runtimeDiagnosticsSnapshot()
+        let capture = diagnostics.captureTelemetry
+        let runtime = diagnostics.status
         let runtimeRatesDiffer = Self.runtimeRatesDiffer(
             captureSampleRate: runtime.captureFormat?.sampleRate,
             renderSampleRate: runtime.renderFormat?.sampleRate,

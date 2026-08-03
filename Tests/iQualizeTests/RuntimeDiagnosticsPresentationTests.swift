@@ -77,6 +77,31 @@ final class RuntimeDiagnosticsPresentationTests: XCTestCase {
         XCTAssertTrue(presentation.report.contains("Output Device UID: dac-uid"))
     }
 
+    func testMatchingEffectiveAndHardwareRatesReportNoDifference() {
+        let status = AudioRuntimeStatus(
+            lifecycleState: .running,
+            userEnabled: true,
+            isRunning: true,
+            captureFormat: .init(sampleRate: 48_000, channelCount: 2),
+            renderFormat: .init(sampleRate: 48_000, channelCount: 2),
+            dspSampleRate: 48_000,
+            outputDevice: .init(
+                id: 1,
+                name: "Built-in Output",
+                uid: "builtin",
+                nominalSampleRate: 48_000,
+                outputChannelCount: 2
+            ),
+            lastFailure: nil,
+            captureHelperRestartCount: 0
+        )
+
+        let presentation = RuntimeDiagnosticsPresentation.make(snapshot: .init(status: status))
+
+        XCTAssertEqual(value("Rates Differ", in: presentation), "No")
+        XCTAssertEqual(value("Drift/Resampling Status", in: presentation), "Unavailable")
+    }
+
     private func value(_ label: String, in presentation: RuntimeDiagnosticsPresentation) -> String? {
         presentation.rows.first { $0.label == label }?.value
     }

@@ -1,14 +1,6 @@
 import Foundation
 
-struct RuntimeDiagnosticsSnapshot: Sendable {
-    let status: AudioRuntimeStatus
-    let captureTelemetry: CaptureClient.Telemetry?
-
-    init(status: AudioRuntimeStatus, captureTelemetry: CaptureClient.Telemetry? = nil) {
-        self.status = status
-        self.captureTelemetry = captureTelemetry
-    }
-}
+typealias RuntimeDiagnosticsSnapshot = AudioRuntimeDiagnosticsSnapshot
 
 struct RuntimeDiagnosticsPresentation: Equatable {
     struct Row: Equatable {
@@ -23,7 +15,12 @@ struct RuntimeDiagnosticsPresentation: Equatable {
 
     static func make(snapshot: RuntimeDiagnosticsSnapshot) -> RuntimeDiagnosticsPresentation {
         let status = snapshot.status
-        let ratesDiffer = ratesDiffer(capture: status.captureFormat, render: status.renderFormat)
+        let ratesDiffer = ratesDiffer(
+            capture: status.captureFormat,
+            render: status.renderFormat,
+            dspSampleRate: status.dspSampleRate,
+            outputSampleRate: status.outputDevice?.nominalSampleRate
+        )
 
         let rows = [
             Row(label: "Effective Capture Format", value: format(status.captureFormat)),
@@ -55,10 +52,17 @@ struct RuntimeDiagnosticsPresentation: Equatable {
 
     private static func ratesDiffer(
         capture: AudioRuntimeStatus.StreamFormat?,
-        render: AudioRuntimeStatus.StreamFormat?
+        render: AudioRuntimeStatus.StreamFormat?,
+        dspSampleRate: Double?,
+        outputSampleRate: Double?
     ) -> Bool? {
-        guard let capture, let render else { return nil }
-        return capture.sampleRate != render.sampleRate || capture.channelCount != render.channelCount
+        var rates: [Double] = []
+        if let capture { rates.append(capture.sampleRate) }
+        if let render { rates.append(render.sampleRate) }
+        if let dspSampleRate { rates.append(dspSampleRate) }
+        if let outputSampleRate { rates.append(outputSampleRate) }
+        guard let first = rates.first, rates.count >= 2 else { return nil }
+        return rates.dropFirst().contains { abs($0 - first) > 0.5 }
     }
 
     private static func driftResamplingStatus(telemetry: CaptureClient.Telemetry?, ratesDiffer: Bool?) -> String {

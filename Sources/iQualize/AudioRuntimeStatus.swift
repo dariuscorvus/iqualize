@@ -144,3 +144,16 @@ struct CoreAudioOutputDevice: Sendable, Equatable {
         self.outputChannelCount = outputChannelCount
     }
 }
+
+/// Read-only view assembled off the audio callback. Both the diagnostics window
+/// and the CLI status surface consume this same snapshot so they cannot drift in
+/// how they interpret effective formats versus live capture telemetry.
+struct AudioRuntimeDiagnosticsSnapshot: Sendable {
+    let status: AudioRuntimeStatus
+    let captureTelemetry: CaptureClient.Telemetry?
+
+    init(status: AudioRuntimeStatus, captureTelemetry: CaptureClient.Telemetry? = nil) {
+        self.status = status
+        self.captureTelemetry = captureTelemetry
+    }
+}

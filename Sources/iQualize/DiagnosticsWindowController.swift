@@ -11,10 +11,7 @@ final class DiagnosticsWindowController: NSWindowController, NSWindowDelegate {
 
     convenience init(audioEngine: AudioEngine) {
         self.init(snapshotProvider: {
-            RuntimeDiagnosticsSnapshot(
-                status: audioEngine.runtimeStatus,
-                captureTelemetry: audioEngine.captureTelemetry()
-            )
+            audioEngine.runtimeDiagnosticsSnapshot()
         })
     }
 
@@ -90,8 +87,8 @@ final class DiagnosticsWindowController: NSWindowController, NSWindowDelegate {
         })
         grid.rowSpacing = 8
         grid.columnSpacing = 12
-        grid.column(at: 0).xPlacement = .trailing
-        grid.column(at: 1).xPlacement = .leading
+        grid.column(at: 0).xPlacement = NSGridCell.Placement.trailing
+        grid.column(at: 1).xPlacement = NSGridCell.Placement.leading
         grid.column(at: 1).width = 360
         mainStack.addArrangedSubview(grid)
 

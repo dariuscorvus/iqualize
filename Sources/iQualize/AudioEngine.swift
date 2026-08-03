@@ -444,6 +444,13 @@ final class AudioEngine {
         captureClient?.telemetrySnapshot()
     }
 
+    /// Reads the immutable runtime status and lock-free capture counters without
+    /// touching the graph. Diagnostics callers may invoke this while playback is
+    /// active; it never starts, stops, or rebuilds audio resources.
+    func runtimeDiagnosticsSnapshot() -> AudioRuntimeDiagnosticsSnapshot {
+        AudioRuntimeDiagnosticsSnapshot(status: runtimeStatus, captureTelemetry: captureTelemetry())
+    }
+
     init() {
         refreshOutputDeviceTelemetry()
         installDeviceChangeListener()
@@ -729,6 +736,16 @@ final class AudioEngine {
             )
         }
         runtimeStatus = next
+
+        let capture = next.captureFormat.map { "\($0.sampleRate)Hz/\($0.channelCount)ch" } ?? "Unavailable"
+        let render = next.renderFormat.map { "\($0.sampleRate)Hz/\($0.channelCount)ch" } ?? "Unavailable"
+        let output = next.outputDevice.map {
+            "\($0.name)/\($0.nominalSampleRate.map { String($0) } ?? "Unavailable")Hz/\($0.outputChannelCount.map(String.init) ?? "Unavailable")ch"
+        } ?? "Unavailable"
+        os_log(.debug, log: appLog,
+               "runtime status state=%{public}@ capture=%{public}@ render=%{public}@ dsp=%{public}@ output=%{public}@",
+               next.lifecycleState.rawValue, capture, render,
+               next.dspSampleRate.map { String($0) } ?? "Unavailable", output)
     }
 
     /// Releases every resource acquired by start(), including resources from a
