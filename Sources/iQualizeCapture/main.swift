@@ -17,21 +17,16 @@ import CoreAudio
 import AudioToolbox
 import Darwin
 import Foundation
+import IQCaptureProtocol
 import IQRingAtomics
 import os.log
 
 private let capLog = OSLog(subsystem: "com.iqualize", category: "capture-helper")
 
 // MARK: - Shared layout
-
-struct SharedHeader {
-    var writeHead: UInt64 = 0
-    var readHead: UInt64 = 0
-    var sampleRate: Float64 = 0
-    var channels: UInt32 = 0
-    var capacityFloats: UInt32 = 0
-    var _pad: (UInt64, UInt64, UInt32) = (0, 0, 0)
-}
+//
+// SharedHeader and the layout version live in IQCaptureProtocol — one
+// definition shared with the app's CaptureClient (#175).
 
 // MARK: - State (all nonisolated for the IOProc + signal handlers)
 
@@ -68,11 +63,33 @@ func stderrLog(_ s: String) {
     FileHandle.standardError.write((s + "\n").data(using: .utf8)!)
 }
 
-func caCheckExit(_ status: OSStatus, _ msg: String, code: Int32) {
+func writeStartupFailure(_ failure: CaptureStartupFailure) {
+    guard let lineData = try? failure.encodedLine() else { return }
+    lineData.withUnsafeBytes { buf in
+        var remaining = buf.count
+        var p = buf.baseAddress!
+        while remaining > 0 {
+            let n = write(STDOUT_FILENO, p, remaining)
+            if n <= 0 { break }
+            remaining -= n
+            p = p.advanced(by: n)
+        }
+    }
+    fsync(STDOUT_FILENO)
+}
+
+func failStartup(_ failure: CaptureStartupFailure) -> Never {
+    writeStartupFailure(failure)
+    cleanupOnce()
+    exit(failure.exitCode)
+}
+
+func caCheckExit(_ status: OSStatus, stage: CaptureStartupFailure.Stage,
+                 _ msg: String, exitCode: Int32) {
     if status != noErr {
         stderrLog("[capture] \(msg): OSStatus \(status)")
-        cleanupOnce()
-        exit(code)
+        failStartup(CaptureStartupFailure(stage: stage, exitCode: exitCode,
+                                          osStatus: Int32(status)))
     }
 }
 
@@ -329,7 +346,7 @@ func run() {
     os_log(.default, log: capLog, "about to create process tap")
     caCheckExit(
         AudioHardwareCreateProcessTap(tapDesc, &tapID),
-        "Failed to create process tap", code: 10
+        stage: .processTap, "Failed to create process tap", exitCode: 10
     )
     tapDescription = tapDesc
     os_log(.default, log: capLog, "tap created id=%{public}d", tapID)
@@ -344,7 +361,7 @@ func run() {
     var formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
     caCheckExit(
         AudioObjectGetPropertyData(tapID, &formatAddr, 0, nil, &formatSize, &tapFormat),
-        "Failed to read tap format", code: 11
+        stage: .tapFormat, "Failed to read tap format", exitCode: 11
     )
     let sampleRate = tapFormat.mSampleRate
     let channels = tapFormat.mChannelsPerFrame
@@ -356,7 +373,7 @@ func run() {
     dataMask = UInt64(dataFloatsPow2 - 1)
 
     // 4. Allocate shared memory
-    let headerSize = (MemoryLayout<SharedHeader>.stride + 63) & ~63
+    let headerSize = CaptureLayout.alignedHeaderSize
     let dataBytes = dataFloatsPow2 * MemoryLayout<Float>.size
     shmTotalSize = size_t(headerSize + dataBytes)
 
@@ -364,19 +381,19 @@ func run() {
     shmFD = shmPath.withCString { open($0, O_CREAT | O_RDWR, 0o666) }
     if shmFD < 0 {
         stderrLog("[capture] open(\(shmPath)) failed: errno=\(errno)")
-        cleanupOnce(); exit(20)
+        failStartup(CaptureStartupFailure(stage: .sharedMemory, exitCode: 20))
     }
     // Belt-and-suspenders for cross-process access between differently
     // signed binaries: explicit fchmod after creation.
     _ = fchmod(shmFD, 0o666)
     if ftruncate(shmFD, off_t(shmTotalSize)) != 0 {
         stderrLog("[capture] ftruncate failed: errno=\(errno)")
-        cleanupOnce(); exit(21)
+        failStartup(CaptureStartupFailure(stage: .sharedMemory, exitCode: 21))
     }
     guard let mapped = mmap(nil, shmTotalSize, PROT_READ | PROT_WRITE, MAP_SHARED, shmFD, 0),
           mapped != MAP_FAILED else {
         stderrLog("[capture] mmap failed: errno=\(errno)")
-        cleanupOnce(); exit(22)
+        failStartup(CaptureStartupFailure(stage: .sharedMemory, exitCode: 22))
     }
 
     headerPtr = mapped.bindMemory(to: SharedHeader.self, capacity: 1)
@@ -384,7 +401,8 @@ func run() {
         writeHead: 0, readHead: 0,
         sampleRate: sampleRate,
         channels: channels,
-        capacityFloats: UInt32(dataFloatsPow2)
+        capacityFloats: UInt32(dataFloatsPow2),
+        layoutVersion: CaptureLayout.version
     )
     writeHeadFieldPtr = mapped
         .advanced(by: MemoryLayout<SharedHeader>.offset(of: \.writeHead)!)
@@ -409,7 +427,7 @@ func run() {
     ]
     caCheckExit(
         AudioHardwareCreateAggregateDevice(aggDesc as CFDictionary, &aggID),
-        "Failed to create aggregate", code: 30
+        stage: .aggregateDevice, "Failed to create aggregate", exitCode: 30
     )
 
     // Wait for device alive
@@ -458,11 +476,11 @@ func run() {
 
     caCheckExit(
         AudioDeviceCreateIOProcIDWithBlock(&procID, aggID, nil, ioBlock),
-        "Failed to create IOProc", code: 31
+        stage: .ioProc, "Failed to create IOProc", exitCode: 31
     )
     caCheckExit(
         AudioDeviceStart(aggID, procID),
-        "Failed to start aggregate", code: 32
+        stage: .ioProc, "Failed to start aggregate", exitCode: 32
     )
     os_log(.default, log: capLog, "aggregate started, about to handshake")
 
@@ -475,6 +493,7 @@ func run() {
         "sampleRate": sampleRate,
         "channels": Int(channels),
         "ringCapacityFloats": dataFloatsPow2,
+        "layoutVersion": Int(CaptureLayout.version),
     ]
     let jsonData = try! JSONSerialization.data(withJSONObject: handshake, options: [])
     var lineData = jsonData
@@ -554,5 +573,5 @@ if #available(macOS 14.2, *) {
     dispatchMain()
 } else {
     stderrLog("[capture] requires macOS 14.2+")
-    exit(99)
+    failStartup(CaptureStartupFailure(stage: .environment, exitCode: 99))
 }

@@ -73,7 +73,7 @@ actor AudioLifecycleCoordinator {
     private let stopOperation: MainAction
     private let readiness: MainReadiness
     private let publishSnapshot: @MainActor @Sendable (AudioLifecycleSnapshot) -> Void
-    private let publishError: @MainActor @Sendable (String?) -> Void
+    private let publishFailure: @MainActor @Sendable (AudioRuntimeFailure?) -> Void
     private let sleeper: Sleep
     private let wakePolicy: AudioLifecycleRetryPolicy
     private let helperPolicy: AudioLifecycleRetryPolicy
@@ -105,7 +105,7 @@ actor AudioLifecycleCoordinator {
         stopOperation: @escaping MainAction,
         readiness: @escaping MainReadiness,
         publishSnapshot: @escaping @MainActor @Sendable (AudioLifecycleSnapshot) -> Void,
-        publishError: @escaping @MainActor @Sendable (String?) -> Void,
+        publishFailure: @escaping @MainActor @Sendable (AudioRuntimeFailure?) -> Void = { _ in },
         wakePolicy: AudioLifecycleRetryPolicy = .wake,
         helperPolicy: AudioLifecycleRetryPolicy = .helper,
         historyLimit: Int = 32,
@@ -117,7 +117,7 @@ actor AudioLifecycleCoordinator {
         self.stopOperation = stopOperation
         self.readiness = readiness
         self.publishSnapshot = publishSnapshot
-        self.publishError = publishError
+        self.publishFailure = publishFailure
         self.wakePolicy = wakePolicy
         self.helperPolicy = helperPolicy
         self.historyLimit = max(1, historyLimit)
@@ -266,17 +266,17 @@ actor AudioLifecycleCoordinator {
         }
         resetHelperFailureBudgetIfStable()
         if helperFailureCount >= helperFailureLimit {
-            let message = "Capture helper failed repeatedly. Re-enable capture to try again."
-            await publishError(message)
+            let failure: AudioRuntimeFailure = .terminal(.unknown)
+            await publishFailure(failure)
             await stopOperation()
-            transition(to: .failed, trigger: .helperTermination, outcome: .failed, message: message)
+            transition(to: .failed, trigger: .helperTermination, outcome: .failed)
             return
         }
         helperFailureCount += 1
         if helperFailureWindowStart == nil {
             helperFailureWindowStart = DispatchTime.now().uptimeNanoseconds
         }
-        await publishError("Capture helper terminated unexpectedly.")
+        await publishFailure(.helperExited(.init(status: -1, signaled: false)))
         _ = await recover(trigger: .helperTermination, policy: helperPolicy, requireReadiness: false)
     }
 
@@ -294,21 +294,21 @@ actor AudioLifecycleCoordinator {
         transition(to: .inactive, trigger: trigger)
     }
 
-    private func startOnce(trigger: AudioLifecycleTrigger) async -> String? {
-        guard userEnabled else { return "Capture is disabled." }
+    private func startOnce(trigger: AudioLifecycleTrigger) async -> AudioRuntimeFailure? {
+        guard userEnabled else { return .terminal(.unknown) }
         transition(to: .starting, trigger: trigger)
         do {
             try await startOperation()
-            await publishError(nil)
+            await publishFailure(nil)
             lastSuccessfulStart = DispatchTime.now().uptimeNanoseconds
             transition(to: .running, trigger: trigger)
             return nil
         } catch {
             await stopOperation()
-            let message = error.localizedDescription
-            await publishError(message)
-            transition(to: .failed, trigger: trigger, outcome: .failed, message: message)
-            return message
+            let failure = AudioRuntimeFailureClassifier.classify(error)
+            await publishFailure(failure)
+            transition(to: .failed, trigger: trigger, outcome: .failed)
+            return failure
         }
     }
 
@@ -330,7 +330,7 @@ actor AudioLifecycleCoordinator {
         transition(to: .recovering, trigger: trigger)
         await stopOperation()
 
-        var lastError: String?
+        var lastFailure: AudioRuntimeFailure?
         for attempt in 0...policy.delaysNanoseconds.count {
             guard isCurrentRecovery(generation) else { return false }
             if attempt > 0 {
@@ -341,24 +341,23 @@ actor AudioLifecycleCoordinator {
             if requireReadiness {
                 let ready = await waitForReadiness(policy: policy, generation: generation)
                 if !ready {
-                    lastError = "Default output device is not ready."
+                    lastFailure = .deviceUnavailable(.defaultOutputNotReady)
                     continue
                 }
             }
 
             if let failure = await startOnce(trigger: trigger) {
-                lastError = failure
+                lastFailure = failure
             } else {
                 return true
             }
             if attempt < policy.delaysNanoseconds.count {
-                transition(to: .recovering, trigger: trigger, message: lastError)
+                transition(to: .recovering, trigger: trigger)
             }
         }
 
-        let message = lastError ?? "Audio recovery failed."
-        await publishError(message)
-        transition(to: .failed, trigger: trigger, outcome: .failed, message: message)
+        await publishFailure(lastFailure ?? .terminal(.unknown))
+        transition(to: .failed, trigger: trigger, outcome: .failed)
         return false
     }
 

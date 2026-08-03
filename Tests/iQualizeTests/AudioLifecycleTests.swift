@@ -11,7 +11,8 @@ private final class LifecycleProbe {
     var readinessChecks = 0
     var ready = true
     var readyAfterChecks: Int?
-    var publishedErrors: [String?] = []
+    var publishedFailures: [AudioRuntimeFailure?] = []
+    var nextError: Error?
 
     func start() throws {
         starts += 1
@@ -20,6 +21,9 @@ private final class LifecycleProbe {
         defer { activeOperations -= 1 }
         if failuresRemaining > 0 {
             failuresRemaining -= 1
+            if let nextError {
+                throw nextError
+            }
             throw NSError(domain: "LifecycleTests", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "synthetic startup failure"])
         }
@@ -107,7 +111,7 @@ final class AudioLifecycleTests: XCTestCase {
             stopOperation: { @MainActor in probe.stop() },
             readiness: { @MainActor in probe.isReady() },
             publishSnapshot: { @MainActor _ in },
-            publishError: { @MainActor message in probe.publishedErrors.append(message) },
+            publishFailure: { @MainActor failure in probe.publishedFailures.append(failure) },
             wakePolicy: wakePolicy,
             helperPolicy: helperPolicy,
             historyLimit: historyLimit,
@@ -115,7 +119,7 @@ final class AudioLifecycleTests: XCTestCase {
         )
     }
 
-    func testFailedStartCleansUpAndPreservesError() async {
+    func testFailedStartCleansUpAndPublishesTypedFailure() async {
         let probe = await MainActor.run { LifecycleProbe() }
         await MainActor.run { probe.failuresRemaining = 1 }
         let coordinator = makeCoordinator(probe: probe)
@@ -123,12 +127,67 @@ final class AudioLifecycleTests: XCTestCase {
         await coordinator.setUserEnabled(true)
 
         let snapshot = await coordinator.snapshot()
-        let values = await MainActor.run { (probe.starts, probe.stops, probe.publishedErrors) }
+        let values = await MainActor.run { (probe.starts, probe.stops, probe.publishedFailures) }
         XCTAssertEqual(snapshot.state, .failed)
         XCTAssertTrue(snapshot.userEnabled)
         XCTAssertEqual(values.0, 1)
         XCTAssertEqual(values.1, 1)
-        XCTAssertTrue(values.2.contains("synthetic startup failure"))
+        XCTAssertEqual(values.2.last!, .terminal(.unknown))
+    }
+
+    func testFailedStartPublishesTypedFailureAndDisablePreservesIt() async {
+        let probe = await MainActor.run { LifecycleProbe() }
+        await MainActor.run {
+            probe.failuresRemaining = 1
+            probe.nextError = CaptureClientError.helperMissing(path: "/missing/iQualizeCapture")
+        }
+        let coordinator = makeCoordinator(probe: probe)
+
+        await coordinator.setUserEnabled(true)
+        await coordinator.setUserEnabled(false)
+
+        let snapshot = await coordinator.snapshot()
+        let failures = await MainActor.run { probe.publishedFailures }
+        XCTAssertEqual(snapshot.state, .inactive)
+        XCTAssertEqual(failures.last!, .helperMissing(.init(path: "/missing/iQualizeCapture")))
+    }
+
+    func testNewerFailureReplacesPreviousFailure() async {
+        let probe = await MainActor.run { LifecycleProbe() }
+        let coordinator = makeCoordinator(probe: probe)
+
+        await MainActor.run {
+            probe.failuresRemaining = 1
+            probe.nextError = CaptureClientError.helperMissing(path: "/missing/iQualizeCapture")
+        }
+        await coordinator.setUserEnabled(true)
+
+        await MainActor.run {
+            probe.failuresRemaining = 1
+            probe.nextError = CaptureClientError.unexpectedExit(status: 9, signaled: true)
+        }
+        await coordinator.setUserEnabled(true)
+
+        let failures = await MainActor.run { probe.publishedFailures }
+        XCTAssertEqual(failures.compactMap { $0 }.last, .helperExited(.init(status: 9, signaled: true)))
+    }
+
+    func testSuccessfulRetryClearsTypedFailure() async {
+        let probe = await MainActor.run { LifecycleProbe() }
+        let coordinator = makeCoordinator(probe: probe)
+
+        await MainActor.run {
+            probe.failuresRemaining = 1
+            probe.nextError = CaptureClientError.handshakeTimeout(seconds: 0.25)
+        }
+        await coordinator.setUserEnabled(true)
+        await MainActor.run { probe.nextError = nil }
+        await coordinator.wake()
+
+        let snapshot = await coordinator.snapshot()
+        let failures = await MainActor.run { probe.publishedFailures }
+        XCTAssertEqual(snapshot.state, .running)
+        XCTAssertNil(failures.last!)
     }
 
     func testHelperRecoveryRetriesAndReturnsToRunning() async {
@@ -164,12 +223,11 @@ final class AudioLifecycleTests: XCTestCase {
         await coordinator.helperTerminated()
 
         let snapshot = await coordinator.snapshot()
-        let stops = await MainActor.run { probe.stops }
+        let values = await MainActor.run { (probe.stops, probe.publishedFailures) }
         XCTAssertEqual(snapshot.state, .failed)
-        XCTAssertGreaterThanOrEqual(stops, 4)
-        XCTAssertTrue(snapshot.history.contains {
-            $0.outcome == .failed && $0.message?.contains("failed repeatedly") == true
-        })
+        XCTAssertGreaterThanOrEqual(values.0, 4)
+        XCTAssertTrue(snapshot.history.contains { $0.outcome == .failed && $0.message == nil })
+        XCTAssertEqual(values.1.last!, .terminal(.unknown))
     }
 
     func testWakeWaitsForReadinessAndRetries() async {

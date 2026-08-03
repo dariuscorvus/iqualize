@@ -312,7 +312,7 @@ final class AudioEngine {
     private(set) var lifecycleHistory: [AudioLifecycleTransition] = []
     private(set) var outputDeviceName = "Unknown"
     private(set) var outputDeviceUID: String?
-    private(set) var error: String?
+    private(set) var lastFailure: AudioRuntimeFailure?
     /// Unexpected helper terminations since the app launched. This is kept
     /// outside CaptureClient because a recovery creates a fresh client.
     private(set) var captureHelperRestartCount: UInt64 = 0
@@ -346,6 +346,10 @@ final class AudioEngine {
     /// both AudioEngine and PresetStore — kept as a closure so AudioEngine stays decoupled
     /// from the store type, same pattern as `onStateChange`.
     var pinnedPresetProvider: ((String) -> EQPresetData?)?
+    /// Fired after a device change applies a pinned preset, so the owner can
+    /// persist the new selection. AudioEngine itself never writes app
+    /// persistence — same decoupling rationale as `pinnedPresetProvider`.
+    var onPinnedPresetApplied: ((UUID) -> Void)?
 
     // Spectrum analyzers — one per tap point
     let preEqAnalyzer = SpectrumAnalyzer()
@@ -466,11 +470,8 @@ final class AudioEngine {
             publishSnapshot: { @MainActor [weak self] snapshot in
                 self?.applyLifecycleSnapshot(snapshot)
             },
-            publishError: { @MainActor [weak self] message in
-                if let message {
-                    os_log(.error, log: appLog, "audio lifecycle failure: %{public}@", message)
-                }
-                self?.error = message
+            publishFailure: { @MainActor [weak self] failure in
+                self?.lastFailure = failure
             }
         )
     }
@@ -492,8 +493,6 @@ final class AudioEngine {
     // MARK: - Start / Stop
 
     private func startGraph() throws {
-        error = nil
-
         let outputDeviceID = try getDefaultOutputDeviceID()
         outputDeviceName = try getDeviceName(outputDeviceID)
         outputDeviceUID = try? getDeviceUID(outputDeviceID)
@@ -911,9 +910,7 @@ final class AudioEngine {
             outputDeviceChanged = defaultOutputDeviceChanged(previousUID: previousUID, currentUID: uid)
             if outputDeviceChanged, let uid, let pinned = pinnedPresetProvider?(uid) {
                 activePreset = pinned
-                var s = iQualizeState.load()
-                s.selectedPresetID = pinned.id
-                s.save()
+                onPinnedPresetApplied?(pinned.id)
             }
         }
 

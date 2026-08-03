@@ -1,4 +1,5 @@
 import XCTest
+import IQCaptureProtocol
 @testable import iQualize
 
 /// End-to-end tests of CaptureClient.readResampled (#133) against a synthetic
@@ -36,8 +37,7 @@ final class CaptureClientResampleTests: XCTestCase {
             header.pointee = SharedHeader(
                 writeHead: 0, readHead: 0,
                 sampleRate: sampleRate, channels: 2,
-                capacityFloats: UInt32(capacityFloats),
-                _pad: (0, 0, 0))
+                capacityFloats: UInt32(capacityFloats))
             data = region.advanced(by: headerSize)
                 .bindMemory(to: Float.self, capacity: capacityFloats)
             data.initialize(repeating: 0, count: capacityFloats)

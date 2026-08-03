@@ -21,6 +21,7 @@ final class EQWindow: ShortcutAwareWindow {
 final class EQWindowController: NSWindowController {
     private let audioEngine: AudioEngine
     private let presetStore: PresetStore
+    private let settings: SettingsStore
     private let viewModel: DreamViewModel
     private let toolbarController: DreamToolbarController
 
@@ -33,10 +34,11 @@ final class EQWindowController: NSWindowController {
         didSet { viewModel.onBypassChanged = onBypassChanged }
     }
 
-    init(audioEngine: AudioEngine, presetStore: PresetStore) {
+    init(audioEngine: AudioEngine, presetStore: PresetStore, settings: SettingsStore) {
         self.audioEngine = audioEngine
         self.presetStore = presetStore
-        self.viewModel = DreamViewModel(audioEngine: audioEngine, presetStore: presetStore)
+        self.settings = settings
+        self.viewModel = DreamViewModel(audioEngine: audioEngine, presetStore: presetStore, settings: settings)
 
         let (window, toolbarController) = DreamHostingView.makeWindow(viewModel: viewModel)
         self.toolbarController = toolbarController
@@ -53,13 +55,11 @@ final class EQWindowController: NSWindowController {
         // Restore active preset. Falls back to Flat if the persisted ID no longer resolves
         // (e.g. it pointed at a built-in that's since been hidden), correcting persisted state
         // so this doesn't repeat on next launch.
-        var state = iQualizeState.load()
-        if let preset = presetStore.preset(for: state.selectedPresetID) {
+        if let preset = presetStore.preset(for: settings.state.selectedPresetID) {
             audioEngine.activePreset = preset
         } else {
             audioEngine.activePreset = .flat
-            state.selectedPresetID = EQPresetData.flat.id
-            state.save()
+            settings.set(\.selectedPresetID, EQPresetData.flat.id)
         }
         viewModel.syncFromAudioEngine(initial: true)
 

@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let stateLog = OSLog(subsystem: "com.iqualize", category: "settings")
 
 // MARK: - State Persistence
 
@@ -71,7 +74,8 @@ struct iQualizeState: Codable {
         zoomRange: nil
     )
 
-    private static let key = "com.iqualize.state"
+    static let key = "com.iqualize.state"
+    static let corruptBackupKeyPrefix = "com.iqualize.state.corruptBackup."
 
     init(captureEnabled: Bool, selectedPresetID: UUID, peakLimiter: Bool, windowOpen: Bool = false, maxGainDB: Float = 12, bypassed: Bool = false, autoScale: Bool = true, preEqSpectrumEnabled: Bool = false, postEqSpectrumEnabled: Bool = false, hideFromDock: Bool = false, startAtLogin: Bool = false, balance: Float = 0.0, splitChannelEnabled: Bool = false, activeChannel: String? = nil, inputGainDB: Float = 0.0, outputGainDB: Float = 0.0, linkGainGlobally: Bool = false, showBandwidthAsQ: Bool = true, preEqLineColorHex: String? = nil, postEqLineColorHex: String? = nil, preEqFillColorHex: String? = nil, postEqFillColorHex: String? = nil, preEqFillEnabled: Bool = false, postEqFillEnabled: Bool = true, dreamTheme: String? = nil, snapToSemitone: Bool = false, zoomRange: String? = nil) {
         self.captureEnabled = captureEnabled
@@ -134,17 +138,42 @@ struct iQualizeState: Codable {
         zoomRange = try? container.decode(String.self, forKey: .zoomRange)
     }
 
-    static func load() -> iQualizeState {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let state = try? JSONDecoder().decode(iQualizeState.self, from: data) else {
+    // Narrow persistence seam used only by SettingsStore (#177). The old
+    // static `load()`/instance `save()` pair is gone so the whole-struct
+    // read-modify-save pattern can no longer compile; all mutation goes
+    // through the store's per-field setters and `update` transactions.
+    static func readPersisted(from defaults: UserDefaults) -> iQualizeState {
+        guard let data = defaults.data(forKey: key) else {
             return .defaultState
         }
-        return state
+
+        do {
+            return try JSONDecoder().decode(iQualizeState.self, from: data)
+        } catch {
+            preserveCorruptPersistedData(data, error: error, in: defaults)
+            return .defaultState
+        }
     }
 
-    func save() {
+    private static func preserveCorruptPersistedData(_ data: Data, error: Error, in defaults: UserDefaults) {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let timestamp = formatter.string(from: Date())
+        var backupKey = corruptBackupKeyPrefix + timestamp
+        var collision = 1
+        while defaults.object(forKey: backupKey) != nil {
+            collision += 1
+            backupKey = "\(corruptBackupKeyPrefix)\(timestamp).\(collision)"
+        }
+
+        defaults.set(data, forKey: backupKey)
+        let message = "failed to decode \(key); preserved \(data.count) bytes under \(backupKey): \(error)"
+        os_log(.error, log: stateLog, "%{public}@", message)
+    }
+
+    func writePersisted(to defaults: UserDefaults) {
         if let data = try? JSONEncoder().encode(self) {
-            UserDefaults.standard.set(data, forKey: iQualizeState.key)
+            defaults.set(data, forKey: iQualizeState.key)
         }
     }
 }
