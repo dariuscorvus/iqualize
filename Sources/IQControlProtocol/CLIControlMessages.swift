@@ -163,8 +163,22 @@ public struct CLIStatusPayload: Codable, Sendable {
     /// Unexpected capture-helper terminations since the app launched.
     /// Optional so older apps and newer CLIs remain forward-compatible.
     public var captureHelperRestarts: UInt64?
+    /// Shared audio runtime diagnostics. All fields are optional so newer CLIs
+    /// continue to decode responses from older apps, and older CLIs ignore them.
+    public var runtimeLifecycleState: String?
+    public var runtimeCaptureSampleRate: Double?
+    public var runtimeCaptureChannelCount: UInt32?
+    public var runtimeRenderSampleRate: Double?
+    public var runtimeRenderChannelCount: UInt32?
+    public var runtimeDSPSampleRate: Double?
+    public var runtimeOutputDeviceUID: String?
+    public var runtimeOutputDeviceNominalSampleRate: Double?
+    public var runtimeOutputDeviceChannelCount: UInt32?
+    public var runtimeRatesDiffer: Bool?
+    public var runtimeResamplingActive: Bool?
+    public var runtimeUnavailableReason: String?
 
-    public init(bypassed: Bool, activePresetID: UUID, activePresetName: String, inputGainDB: Float, outputGainDB: Float, balance: Float, gainIsGlobal: Bool, outputDeviceName: String, isRunning: Bool, peakLimiter: Bool, preEqSpectrumEnabled: Bool, postEqSpectrumEnabled: Bool, appVersion: String? = nil, gitCommit: String? = nil, captureFillFrames: Int? = nil, captureDriftPpm: Double? = nil, captureUnderruns: UInt64? = nil, captureOverrunResyncs: UInt64? = nil, captureHelperRestarts: UInt64? = nil) {
+    public init(bypassed: Bool, activePresetID: UUID, activePresetName: String, inputGainDB: Float, outputGainDB: Float, balance: Float, gainIsGlobal: Bool, outputDeviceName: String, isRunning: Bool, peakLimiter: Bool, preEqSpectrumEnabled: Bool, postEqSpectrumEnabled: Bool, appVersion: String? = nil, gitCommit: String? = nil, captureFillFrames: Int? = nil, captureDriftPpm: Double? = nil, captureUnderruns: UInt64? = nil, captureOverrunResyncs: UInt64? = nil, captureHelperRestarts: UInt64? = nil, runtimeLifecycleState: String? = nil, runtimeCaptureSampleRate: Double? = nil, runtimeCaptureChannelCount: UInt32? = nil, runtimeRenderSampleRate: Double? = nil, runtimeRenderChannelCount: UInt32? = nil, runtimeDSPSampleRate: Double? = nil, runtimeOutputDeviceUID: String? = nil, runtimeOutputDeviceNominalSampleRate: Double? = nil, runtimeOutputDeviceChannelCount: UInt32? = nil, runtimeRatesDiffer: Bool? = nil, runtimeResamplingActive: Bool? = nil, runtimeUnavailableReason: String? = nil) {
         self.bypassed = bypassed
         self.activePresetID = activePresetID
         self.activePresetName = activePresetName
@@ -184,6 +198,18 @@ public struct CLIStatusPayload: Codable, Sendable {
         self.captureUnderruns = captureUnderruns
         self.captureOverrunResyncs = captureOverrunResyncs
         self.captureHelperRestarts = captureHelperRestarts
+        self.runtimeLifecycleState = runtimeLifecycleState
+        self.runtimeCaptureSampleRate = runtimeCaptureSampleRate
+        self.runtimeCaptureChannelCount = runtimeCaptureChannelCount
+        self.runtimeRenderSampleRate = runtimeRenderSampleRate
+        self.runtimeRenderChannelCount = runtimeRenderChannelCount
+        self.runtimeDSPSampleRate = runtimeDSPSampleRate
+        self.runtimeOutputDeviceUID = runtimeOutputDeviceUID
+        self.runtimeOutputDeviceNominalSampleRate = runtimeOutputDeviceNominalSampleRate
+        self.runtimeOutputDeviceChannelCount = runtimeOutputDeviceChannelCount
+        self.runtimeRatesDiffer = runtimeRatesDiffer
+        self.runtimeResamplingActive = runtimeResamplingActive
+        self.runtimeUnavailableReason = runtimeUnavailableReason
     }
 }
 

@@ -958,6 +958,15 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
 
     func statusSnapshot() -> CLIStatusPayload {
         let capture = audioEngine.captureTelemetry()
+        let runtime = audioEngine.runtimeStatus
+        let runtimeRatesDiffer = Self.runtimeRatesDiffer(
+            captureSampleRate: runtime.captureFormat?.sampleRate,
+            renderSampleRate: runtime.renderFormat?.sampleRate,
+            dspSampleRate: runtime.dspSampleRate,
+            outputSampleRate: runtime.outputDevice?.nominalSampleRate
+        )
+        let driftActive = (capture?.driftPpm).map { abs($0) > 0.1 }
+        let runtimeResamplingActive = runtimeRatesDiffer.map { $0 || (driftActive ?? false) } ?? driftActive
         return CLIStatusPayload(
             bypassed: audioEngine.bypassed,
             activePresetID: audioEngine.activePreset.id,
@@ -977,8 +986,43 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
             captureDriftPpm: capture?.driftPpm,
             captureUnderruns: capture?.underruns,
             captureOverrunResyncs: capture?.overrunResyncs,
-            captureHelperRestarts: audioEngine.captureHelperRestartCount
+            captureHelperRestarts: audioEngine.captureHelperRestartCount,
+            runtimeLifecycleState: runtime.lifecycleState.rawValue,
+            runtimeCaptureSampleRate: runtime.captureFormat?.sampleRate,
+            runtimeCaptureChannelCount: runtime.captureFormat?.channelCount,
+            runtimeRenderSampleRate: runtime.renderFormat?.sampleRate,
+            runtimeRenderChannelCount: runtime.renderFormat?.channelCount,
+            runtimeDSPSampleRate: runtime.dspSampleRate,
+            runtimeOutputDeviceUID: runtime.outputDevice?.uid,
+            runtimeOutputDeviceNominalSampleRate: runtime.outputDevice?.nominalSampleRate,
+            runtimeOutputDeviceChannelCount: runtime.outputDevice?.outputChannelCount,
+            runtimeRatesDiffer: runtimeRatesDiffer,
+            runtimeResamplingActive: runtimeResamplingActive,
+            runtimeUnavailableReason: runtimeUnavailableReason(from: runtime)
         )
+    }
+
+    private static func runtimeRatesDiffer(
+        captureSampleRate: Double?,
+        renderSampleRate: Double?,
+        dspSampleRate: Double?,
+        outputSampleRate: Double?
+    ) -> Bool? {
+        let rates = [captureSampleRate, renderSampleRate, dspSampleRate, outputSampleRate].compactMap { $0 }
+        guard rates.count >= 2 else { return nil }
+        guard let first = rates.first else { return nil }
+        return rates.dropFirst().contains { abs($0 - first) > 0.5 }
+    }
+
+    private func runtimeUnavailableReason(from runtime: AudioRuntimeStatus) -> String? {
+        guard runtime.lifecycleState != .running else { return nil }
+        let title = MenuBarRuntimePresentation.make(
+            lifecycleState: runtime.lifecycleState,
+            userEnabled: runtime.userEnabled,
+            bypassed: audioEngine.bypassed,
+            lastFailure: runtime.lastFailure
+        ).title
+        return title.replacingOccurrences(of: "Status: ", with: "")
     }
 
     func listPresetSummaries() -> [CLIPresetSummary] {

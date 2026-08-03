@@ -66,7 +66,7 @@ struct Version: ParsableCommand {
 }
 
 struct Status: ParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Show app version, capture/bypass/limiter state, active preset, gain, balance, spectrum overlays, and output device.")
+    static let configuration = CommandConfiguration(abstract: "Show app version, capture/bypass/limiter state, active preset, gain, balance, spectrum overlays, output device, and runtime diagnostics.")
 
     @Flag(help: "Show quick usage examples for this command.")
     var tldr = false
