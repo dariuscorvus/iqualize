@@ -40,6 +40,53 @@ func formatVersion(_ status: CLIStatusPayload) -> String {
     return status.gitCommit.map { "\(version) (\($0))" } ?? version
 }
 
+private func formatUnavailable<T>(_ value: T?, _ transform: (T) -> String) -> String {
+    value.map(transform) ?? "Unavailable"
+}
+
+private func formatRuntimeRate(_ value: Double?) -> String {
+    formatUnavailable(value) { String(format: "%.0f Hz", $0) }
+}
+
+private func formatRuntimeChannels(_ value: UInt32?) -> String {
+    formatUnavailable(value) { "\($0)" }
+}
+
+private func formatRuntimeBool(_ value: Bool?) -> String {
+    formatUnavailable(value) { $0 ? "yes" : "no" }
+}
+
+private func hasRuntimeDiagnostics(_ status: CLIStatusPayload) -> Bool {
+    status.runtimeLifecycleState != nil
+        || status.runtimeCaptureSampleRate != nil
+        || status.runtimeCaptureChannelCount != nil
+        || status.runtimeRenderSampleRate != nil
+        || status.runtimeRenderChannelCount != nil
+        || status.runtimeDSPSampleRate != nil
+        || status.runtimeOutputDeviceUID != nil
+        || status.runtimeOutputDeviceNominalSampleRate != nil
+        || status.runtimeOutputDeviceChannelCount != nil
+        || status.runtimeRatesDiffer != nil
+        || status.runtimeResamplingActive != nil
+        || status.runtimeUnavailableReason != nil
+}
+
+private func formatRuntimeDiagnostics(_ status: CLIStatusPayload) -> String {
+    """
+    Runtime diagnostics:
+      Lifecycle: \(status.runtimeLifecycleState ?? "Unavailable")
+      Capture stream: \(formatRuntimeRate(status.runtimeCaptureSampleRate)), \(formatRuntimeChannels(status.runtimeCaptureChannelCount)) channels
+      Render stream: \(formatRuntimeRate(status.runtimeRenderSampleRate)), \(formatRuntimeChannels(status.runtimeRenderChannelCount)) channels
+      DSP sample rate: \(formatRuntimeRate(status.runtimeDSPSampleRate))
+      Output device UID: \(status.runtimeOutputDeviceUID ?? "Unavailable")
+      Output device nominal rate: \(formatRuntimeRate(status.runtimeOutputDeviceNominalSampleRate))
+      Output device channels: \(formatRuntimeChannels(status.runtimeOutputDeviceChannelCount))
+      Rates differ: \(formatRuntimeBool(status.runtimeRatesDiffer))
+      Drift/resampling active: \(formatRuntimeBool(status.runtimeResamplingActive))
+      Unavailable: \(status.runtimeUnavailableReason ?? "Unavailable")
+    """
+}
+
 func formatStatus(_ status: CLIStatusPayload) -> String {
     let mode = status.gainIsGlobal ? "shared" : "per-preset"
     var lines = """
@@ -65,6 +112,9 @@ func formatStatus(_ status: CLIStatusPayload) -> String {
     }
     if let restarts = status.captureHelperRestarts, restarts > 0 {
         lines += "\nCapture helper restarts: \(restarts)"
+    }
+    if hasRuntimeDiagnostics(status) {
+        lines += "\n" + formatRuntimeDiagnostics(status)
     }
     return lines
 }

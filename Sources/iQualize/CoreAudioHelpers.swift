@@ -83,3 +83,55 @@ func getDeviceUID(_ deviceID: AudioDeviceID) throws -> String {
 func getDeviceName(_ deviceID: AudioDeviceID) throws -> String {
     try getCFStringProperty(deviceID, kAudioObjectPropertyName, "Failed to get device name")
 }
+
+func getDeviceNominalSampleRate(_ deviceID: AudioDeviceID) throws -> Double {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var sampleRate = Float64(0)
+    var size = UInt32(MemoryLayout<Float64>.size)
+    try caCheck(
+        AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &sampleRate),
+        "Failed to get device nominal sample rate"
+    )
+    return sampleRate
+}
+
+func getDeviceOutputChannelCount(_ deviceID: AudioDeviceID) throws -> UInt32 {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyStreamConfiguration,
+        mScope: kAudioDevicePropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var size: UInt32 = 0
+    try caCheck(
+        AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size),
+        "Failed to get device output stream configuration size"
+    )
+    let bufferListPointer = UnsafeMutableRawPointer.allocate(
+        byteCount: Int(size),
+        alignment: MemoryLayout<AudioBufferList>.alignment
+    )
+    defer { bufferListPointer.deallocate() }
+    try caCheck(
+        AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, bufferListPointer),
+        "Failed to get device output stream configuration"
+    )
+    let bufferList = UnsafeMutableAudioBufferListPointer(
+        bufferListPointer.assumingMemoryBound(to: AudioBufferList.self)
+    )
+    return bufferList.reduce(UInt32(0)) { $0 + $1.mNumberChannels }
+}
+
+func getDefaultOutputDevice() throws -> CoreAudioOutputDevice {
+    let deviceID = try getDefaultOutputDeviceID()
+    return CoreAudioOutputDevice(
+        id: deviceID,
+        name: try getDeviceName(deviceID),
+        uid: try? getDeviceUID(deviceID),
+        nominalSampleRate: try? getDeviceNominalSampleRate(deviceID),
+        outputChannelCount: try? getDeviceOutputChannelCount(deviceID)
+    )
+}

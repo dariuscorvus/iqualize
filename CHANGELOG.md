@@ -2,6 +2,14 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.60.0] - 2026-08-03
+
+### Added
+- Runtime diagnostics now report precise capture, render, and output-device telemetry across the shared CLI and UI availability surfaces.
+
+### Changed
+- Availability reporting now preserves unavailable values explicitly and keeps diagnostics read-only, so status inspection does not mutate capture state.
+
 ## [0.59.0] - 2026-08-03
 
 ### Added
