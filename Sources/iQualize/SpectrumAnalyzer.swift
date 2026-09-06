@@ -1,5 +1,6 @@
 import Accelerate
 import AVFAudio
+import Foundation
 
 /// Real-time FFT spectrum analyzer. Processes AVAudioPCMBuffers from an installTap
 /// callback and writes smoothed log-frequency magnitudes + peak hold values to a
@@ -8,6 +9,10 @@ import AVFAudio
 /// One instance per tap point (pre-EQ and post-EQ each get their own).
 /// All processing happens in the tap callback — no additional threads.
 final class SpectrumAnalyzer: @unchecked Sendable {
+    /// Peak-hold / decay below are tuned for this rate; UI TimelineView matches it.
+    static let targetRefreshHz: Double = 23.4
+    static var targetInterval: TimeInterval { 1.0 / targetRefreshHz }
+
     let spectrumData = SpectrumData()
 
     // FFT configuration
@@ -39,6 +44,18 @@ final class SpectrumAnalyzer: @unchecked Sendable {
     private let peakHoldFrames: Int = 47       // ~2s at ~23.4Hz FFT rate
     private let peakFallRate: Float = 1.7      // dB per FFT frame (~40 dB/s)
     private let silenceThreshold: Float = -89.0
+
+    /// Main writes, audio tap reads. Aligned Int32 load/store is atomic on ARM64
+    /// (same pattern as `SpectrumData.activeIndex`).
+    private var enabledFlag: Int32 = 0
+    /// Audio-thread only — last successful FFT time for rate limiting.
+    private var lastProcessTime: TimeInterval = 0
+
+    /// When false, tap callbacks skip FFT work. Gate on spectrum overlay + window visibility.
+    var isProcessingEnabled: Bool {
+        get { enabledFlag != 0 }
+        set { enabledFlag = newValue ? 1 : 0 }
+    }
 
     init() {
         fftSetup = vDSP_create_fftsetup(11, FFTRadix(kFFTRadix2))!
@@ -91,6 +108,11 @@ final class SpectrumAnalyzer: @unchecked Sendable {
 
     /// Process a buffer from installTap. Call this directly in the tap closure.
     func process(_ buffer: AVAudioPCMBuffer, sampleRate: Double) {
+        guard enabledFlag != 0 else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        if lastProcessTime > 0, (now - lastProcessTime) < Self.targetInterval { return }
+        lastProcessTime = now
+
         guard let channelData = buffer.floatChannelData else { return }
         let frameCount = Int(buffer.frameLength)
         guard frameCount > 0 else { return }

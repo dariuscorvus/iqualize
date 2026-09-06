@@ -16,9 +16,10 @@ struct EQCanvasView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                // Only the spectrum trace is time-varying. Keeping the grid, labels, band
-                // responses, and knobs outside TimelineView avoids rebuilding the entire graph
-                // for every spectrum frame.
+                // Spectrum is an AppKit timer-driven overlay (not TimelineView) so the
+                // ~23 Hz refresh does not force NSHostingView.layout on the whole EQ UI.
+                // Grid / curves / knobs stay on a SwiftUI Canvas that only invalidates
+                // when Observable inputs change.
                 if EQCanvasRenderPolicy.shouldAnimate(
                     windowForeground: windowIsForeground,
                     engineRunning: vm.audioEngine.isRunning,
@@ -26,21 +27,19 @@ struct EQCanvasView: View {
                     postEqEnabled: vm.postEqEnabled,
                     bypassed: vm.bypass
                 ) {
-                    TimelineView(.periodic(
-                        from: .now,
-                        by: EQCanvasRenderPolicy.spectrumFrameInterval
-                    )) { _ in
-                        Canvas(rendersAsynchronously: false) { ctx, size in
-                            scratch.refreshSpectra(
-                                preEq: vm.audioEngine.preEqAnalyzer.spectrumData,
-                                postEq: vm.audioEngine.postEqAnalyzer.spectrumData,
-                                engineRunning: vm.audioEngine.isRunning,
-                                readPreEq: vm.preEqEnabled,
-                                readPostEq: vm.postEqEnabled && !vm.bypass
-                            )
-                            drawSpectra(into: &ctx, size: size)
-                        }
-                    }
+                    SpectrumOverlayView(
+                        preEq: vm.audioEngine.preEqAnalyzer.spectrumData,
+                        postEq: vm.audioEngine.postEqAnalyzer.spectrumData,
+                        engineRunning: vm.audioEngine.isRunning,
+                        preEnabled: vm.preEqEnabled,
+                        postEnabled: vm.postEqEnabled && !vm.bypass,
+                        preLine: NSColor(vm.preEqLineColor),
+                        postLine: NSColor(vm.postEqLineColor),
+                        preFill: vm.preEqFillEnabled ? NSColor(vm.preEqFillColor).withAlphaComponent(0.18) : nil,
+                        postFill: vm.postEqFillEnabled ? NSColor(vm.postEqFillColor).withAlphaComponent(0.18) : nil,
+                        displayMax: computeDisplayMax(bands: vm.displayBands, W: proxy.size.width),
+                        domain: domain
+                    )
                     .allowsHitTesting(false)
                 }
 
@@ -98,6 +97,7 @@ struct EQCanvasView: View {
     private func updateWindowForegroundState() {
         guard let window = vm.window else {
             windowIsForeground = false
+            vm.isEQWindowVisible = false
             return
         }
         windowIsForeground = NSApp.isActive
@@ -105,6 +105,8 @@ struct EQCanvasView: View {
             && window.isVisible
             && !window.isMiniaturized
             && window.occlusionState.contains(.visible)
+        // Drive FFT enablement from the same foreground predicate as the overlay mount.
+        vm.isEQWindowVisible = windowIsForeground
     }
 
     // MARK: - Zoom control
@@ -417,85 +419,6 @@ struct EQCanvasView: View {
                 ctx.draw(bwView, at: CGPoint(x: x, y: y - knobR - 8), anchor: .center)
             }
         }
-    }
-
-    private func drawSpectra(into ctx: inout GraphicsContext, size: CGSize) {
-        let displayMax = computeDisplayMax(bands: vm.displayBands, W: size.width)
-        if vm.preEqEnabled {
-            drawRealSpectrum(
-                into: &ctx,
-                size: size,
-                mags: scratch.preEqMags,
-                color: vm.preEqLineColor,
-                fillColor: vm.preEqFillEnabled ? vm.preEqFillColor.opacity(0.18) : nil,
-                displayMax: displayMax
-            )
-        }
-        if vm.postEqEnabled && !vm.bypass {
-            drawRealSpectrum(
-                into: &ctx,
-                size: size,
-                mags: scratch.postEqMags,
-                color: vm.postEqLineColor,
-                fillColor: vm.postEqFillEnabled ? vm.postEqFillColor.opacity(0.18) : nil,
-                displayMax: displayMax
-            )
-        }
-    }
-
-    /// Draw a spectrum trace from real magnitude data (in dB, log-spaced bins 20Hz-20kHz).
-    private func drawRealSpectrum(into ctx: inout GraphicsContext, size: CGSize, mags: [Float], color: Color, fillColor: Color?, displayMax: Double) {
-        let W = size.width, H = size.height
-        let count = mags.count
-        guard count > 1 else { return }
-
-        // Light moving-average smoothing in dB to soften the bin-to-bin jitter before splining.
-        let smoothed = smoothMagnitudes(mags, window: 3)
-
-        var pts: [CGPoint] = []
-        for i in 0..<count {
-            let t = Float(i) / Float(count - 1)
-            let f = 20.0 * powf(1000.0, t)
-            let x = freqToX(Double(f), W: W)
-            // Map dBFS (-90..0) onto the visible y-range so silence sits at the bottom and 0 dBFS
-            // reaches the top of the chart.
-            let db = max(-90.0, Double(smoothed[i]))
-            let mapped = (db + 90.0) / 90.0 * (displayMax * 2) - displayMax
-            pts.append(CGPoint(x: x, y: gainToY(mapped, H: H, maxDB: displayMax)))
-        }
-        // Extend flat into the edge margins (matching how the composite curve behaves there)
-        // instead of stopping short of the canvas edge at the 20 Hz / 20 kHz bins.
-        if let first = pts.first, let last = pts.last {
-            pts.insert(CGPoint(x: 0, y: first.y), at: 0)
-            pts.append(CGPoint(x: W, y: last.y))
-        }
-
-        if let fc = fillColor {
-            var p = smoothPath(pts: pts)
-            p.addLine(to: CGPoint(x: pts.last!.x, y: H))
-            p.addLine(to: CGPoint(x: pts.first!.x, y: H))
-            p.closeSubpath()
-            ctx.fill(p, with: .linearGradient(
-                Gradient(colors: [fc, Color.black.opacity(0)]),
-                startPoint: .zero,
-                endPoint: CGPoint(x: 0, y: H)
-            ))
-        }
-        let line = smoothPath(pts: pts)
-        ctx.stroke(line, with: .color(color.opacity(0.85)), lineWidth: 1.4)
-    }
-
-    /// Box-window smoothing on the dB magnitude array (keeps endpoints intact).
-    private func smoothMagnitudes(_ mags: [Float], window: Int) -> [Float] {
-        guard window > 1, mags.count > window else { return mags }
-        let half = window / 2
-        var out = mags
-        for i in half..<(mags.count - half) {
-            var sum: Float = 0
-            for k in (i - half)...(i + half) { sum += mags[k] }
-            out[i] = sum / Float(window)
-        }
-        return out
     }
 
     /// Catmull-Rom spline through `pts`, rendered as cubic Beziers. Open path (line, no fill).
@@ -942,38 +865,7 @@ private struct HitResult {
 /// Reference-typed scratchpad. Held inside @State for stability across redraws,
 /// but mutated *outside* SwiftUI's body invariants (no @State setters fired).
 final class CanvasScratch {
-    var preEqMags: [Float] = Array(repeating: -90, count: SpectrumData.binCount)
-    var postEqMags: [Float] = Array(repeating: -90, count: SpectrumData.binCount)
-    private var peaksScratch: [Float] = Array(repeating: -90, count: SpectrumData.binCount)
     private var scrollCommitTask: Task<Void, Never>?
-
-    func refreshSpectra(
-        preEq: SpectrumData,
-        postEq: SpectrumData,
-        engineRunning: Bool,
-        readPreEq: Bool,
-        readPostEq: Bool
-    ) {
-        guard engineRunning else {
-            for i in preEqMags.indices { preEqMags[i] = -90 }
-            for i in postEqMags.indices { postEqMags[i] = -90 }
-            return
-        }
-        if readPreEq {
-            preEqMags.withUnsafeMutableBufferPointer { mags in
-                peaksScratch.withUnsafeMutableBufferPointer { peaks in
-                    preEq.read(mags.baseAddress!, peaks: peaks.baseAddress!)
-                }
-            }
-        }
-        if readPostEq {
-            postEqMags.withUnsafeMutableBufferPointer { mags in
-                peaksScratch.withUnsafeMutableBufferPointer { peaks in
-                    postEq.read(mags.baseAddress!, peaks: peaks.baseAddress!)
-                }
-            }
-        }
-    }
 
     @MainActor
     func scheduleScrollCommit(_ commit: @escaping @MainActor () -> Void) {

@@ -115,10 +115,12 @@ final class EQWindowController: NSWindowController {
 
     func syncPreEqSpectrum(_ on: Bool) {
         viewModel.preEqEnabled = on
+        viewModel.syncSpectrumProcessing()
     }
 
     func syncPostEqSpectrum(_ on: Bool) {
         viewModel.postEqEnabled = on
+        viewModel.syncSpectrumProcessing()
     }
 
     func syncBandwidthMode(asQ: Bool) {
