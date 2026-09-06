@@ -53,7 +53,11 @@ final class EQCanvasRenderPolicyTests: XCTestCase {
         ))
     }
 
-    func testForegroundSpectrumRateIsSixtyFramesPerSecond() {
-        XCTAssertEqual(EQCanvasRenderPolicy.spectrumFrameInterval, 1.0 / 60.0, accuracy: 0.000_001)
+    func testForegroundSpectrumRateMatchesAnalyzerTarget() {
+        XCTAssertEqual(
+            EQCanvasRenderPolicy.spectrumFrameInterval,
+            SpectrumAnalyzer.targetInterval,
+            accuracy: 0.000_001
+        )
     }
 }

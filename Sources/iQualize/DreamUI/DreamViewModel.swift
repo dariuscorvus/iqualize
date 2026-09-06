@@ -75,6 +75,12 @@ final class DreamViewModel {
     var preEqFillEnabled: Bool = false
     var postEqFillEnabled: Bool = true
 
+    /// True while the EQ window is foreground-visible (same predicate as spectrum overlay mount).
+    /// Gates FFT work so closed/background windows do not keep analyzing.
+    var isEQWindowVisible: Bool = false {
+        didSet { syncSpectrumProcessing() }
+    }
+
     var outputDeviceName: String { audioEngine.outputDeviceName }
 
     /// Whether the active preset is the one pinned to the current output device.
@@ -166,6 +172,14 @@ final class DreamViewModel {
         settings.set(\.showBandwidthAsQ, bandwidthDisplay == .q)
     }
 
+    /// Enable each FFT only while its overlay is on and the EQ window is visible.
+    /// Rate limiting inside `SpectrumAnalyzer` keeps work at `targetRefreshHz`.
+    func syncSpectrumProcessing() {
+        audioEngine.preEqAnalyzer.isProcessingEnabled = isEQWindowVisible && preEqEnabled
+        audioEngine.postEqAnalyzer.isProcessingEnabled =
+            isEQWindowVisible && postEqEnabled && !bypass
+    }
+
     func persistFooterToggles() {
         settings.update {
             $0.peakLimiter = peakLimiter
@@ -180,6 +194,7 @@ final class DreamViewModel {
             $0.splitChannelEnabled = channel != .linked
             $0.activeChannel = channel == .r ? "right" : (channel == .l ? "left" : nil)
         }
+        syncSpectrumProcessing()
     }
 
     // MARK: - Audio engine sync

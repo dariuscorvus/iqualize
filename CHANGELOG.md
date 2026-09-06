@@ -2,6 +2,12 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.61.0] - 2026-09-06
+
+### Changed
+- Spectrum overlays now draw via an AppKit timer view instead of SwiftUI `TimelineView`, so ~23 Hz refresh no longer forces a full `NSHostingView` layout pass on the EQ editor.
+- FFT analysis is rate-limited to match the overlay (~23.4 Hz) and disabled while the EQ window is backgrounded or the corresponding spectrum toggle is off.
+
 ## [0.60.1] - 2026-08-17
 
 ### Fixed

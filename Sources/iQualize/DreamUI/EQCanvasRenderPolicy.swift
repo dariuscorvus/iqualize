@@ -1,10 +1,13 @@
 import Foundation
 
-/// Keeps realtime spectrum work separate from the otherwise static EQ editor.
-/// The active EQ window retains display-rate spectrum motion; background windows
-/// do not own a TimelineView and therefore produce no periodic UI frames.
+/// Decides when the realtime spectrum overlay is mounted.
+///
+/// Spectrum drawing lives in an AppKit timer view (`SpectrumOverlayView`) so
+/// refresh does not force `NSHostingView` layout. Background / inactive windows
+/// do not mount the overlay and therefore produce no periodic UI frames.
 enum EQCanvasRenderPolicy {
-    static let spectrumFrameInterval: TimeInterval = 1.0 / 60.0
+    /// Informational — the AppKit overlay uses `SpectrumAnalyzer.targetInterval` (~23.4 Hz).
+    static let spectrumFrameInterval: TimeInterval = SpectrumAnalyzer.targetInterval
 
     static func shouldAnimate(
         windowForeground: Bool,
