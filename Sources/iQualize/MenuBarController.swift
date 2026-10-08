@@ -15,15 +15,17 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     private let audioEngine: AudioEngine
     private let presetStore: PresetStore
     private let settings: SettingsStore
+    private let dockPolicy: DockPolicyController
     private var eqWindowController: EQWindowController?
     private var settingsWindowController: SettingsWindowController?
     private var helpWindowController: HelpWindowController?
     private var diagnosticsWindowController: DiagnosticsWindowController?
 
-    init(audioEngine: AudioEngine, presetStore: PresetStore, settings: SettingsStore) {
+    init(audioEngine: AudioEngine, presetStore: PresetStore, settings: SettingsStore, dockPolicy: DockPolicyController) {
         self.audioEngine = audioEngine
         self.presetStore = presetStore
         self.settings = settings
+        self.dockPolicy = dockPolicy
         super.init()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -251,7 +253,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     @objc private func openSettings(_ sender: NSMenuItem) {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                audioEngine: audioEngine, presetStore: presetStore, settings: settings, eqWindowController: eqWindowController)
+                audioEngine: audioEngine, presetStore: presetStore, settings: settings, dockPolicy: dockPolicy, eqWindowController: eqWindowController)
         }
         settingsWindowController?.updateEQWindowController(eqWindowController)
         settingsWindowController?.showWindow(nil)
@@ -361,7 +363,7 @@ final class MenuBarController: NSObject, NSMenuDelegate, CLICommandHandling {
     func showSettings() {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                audioEngine: audioEngine, presetStore: presetStore, settings: settings, eqWindowController: eqWindowController)
+                audioEngine: audioEngine, presetStore: presetStore, settings: settings, dockPolicy: dockPolicy, eqWindowController: eqWindowController)
         }
         settingsWindowController?.updateEQWindowController(eqWindowController)
         settingsWindowController?.showWindow(nil)

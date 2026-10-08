@@ -7,6 +7,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let audioEngine: AudioEngine
     private let presetStore: PresetStore
     private let settings: SettingsStore
+    private let dockPolicy: DockPolicyController
     private weak var eqWindowController: EQWindowController?
 
     private var peakLimiterCheckbox: NSButton!
@@ -31,10 +32,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var linkGainCheckbox: NSButton!
     private var installCLIButton: NSButton!
 
-    init(audioEngine: AudioEngine, presetStore: PresetStore, settings: SettingsStore, eqWindowController: EQWindowController?) {
+    init(audioEngine: AudioEngine, presetStore: PresetStore, settings: SettingsStore, dockPolicy: DockPolicyController, eqWindowController: EQWindowController?) {
         self.audioEngine = audioEngine
         self.presetStore = presetStore
         self.settings = settings
+        self.dockPolicy = dockPolicy
         self.eqWindowController = eqWindowController
 
         let window = ShortcutAwareWindow(
@@ -64,6 +66,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidBecomeKey(_ notification: Notification) {
         let state = settings.state
+        hideFromDockCheckbox.state = state.hideFromDock ? .on : .off
         peakLimiterCheckbox.state = audioEngine.peakLimiter ? .on : .off
         maxGainPicker.selectItem(withTag: Int(audioEngine.maxGainDB))
         autoScaleCheckbox.state = state.autoScale ? .on : .off
@@ -469,7 +472,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     @objc private func toggleHideFromDock(_ sender: NSButton) {
         let hide = sender.state == .on
         settings.set(\.hideFromDock, hide)
-        NSApp.setActivationPolicy(hide ? .accessory : .regular)
+        dockPolicy.reconcile(reason: .settingsChanged)
         if !hide {
             NSApp.activate(ignoringOtherApps: true)
         }

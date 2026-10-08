@@ -10,9 +10,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var presetStore: PresetStore!
     private var cliControlServer: CLIControlServer!
     private let settings: SettingsStore
+    private let dockPolicy: DockPolicyController
 
-    init(settings: SettingsStore) {
+    init(settings: SettingsStore, dockPolicy: DockPolicyController) {
         self.settings = settings
+        self.dockPolicy = dockPolicy
         super.init()
     }
     private var terminationInProgress = false
@@ -27,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         audioEngine = AudioEngine()
         presetStore = PresetStore()
-        menuBarController = MenuBarController(audioEngine: audioEngine, presetStore: presetStore, settings: settings)
+        menuBarController = MenuBarController(audioEngine: audioEngine, presetStore: presetStore, settings: settings, dockPolicy: dockPolicy)
 
         cliControlServer = CLIControlServer(handler: menuBarController)
         cliControlServer.start()
@@ -63,6 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 self?.handleWake()
             }
         }
+
+        // Reconcile the live preference after launch setup and saved-window
+        // restoration as well as before app.run() (#210).
+        dockPolicy.reconcile(reason: .launchCompleted)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -80,11 +86,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         for window in NSApp.windows where window.isVisible && window.styleMask.contains(.titled) {
             window.close()
         }
-        NSApp.setActivationPolicy(.accessory)
         settings.update {
             $0.hideFromDock = true
             $0.windowOpen = false
         }
+        dockPolicy.reconcile(reason: .dockQuit)
         return .terminateCancel
     }
 
@@ -234,8 +240,9 @@ struct iQualizeMain {
         if #available(macOS 14.2, *) {
             let app = NSApplication.shared
             let settings = SettingsStore()
-            app.setActivationPolicy(settings.state.hideFromDock ? .accessory : .regular)
-            let delegate = AppDelegate(settings: settings)
+            let dockPolicy = DockPolicyController(settings: settings)
+            dockPolicy.reconcile(reason: .bootstrap)
+            let delegate = AppDelegate(settings: settings, dockPolicy: dockPolicy)
             appDelegate = delegate
             app.delegate = delegate
             app.run()

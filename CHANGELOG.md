@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.60.2] - 2026-10-08
+
+### Fixed
+- Reconcile the saved Hide from Dock preference after launch setup and EQ window restoration, without requiring a Settings toggle (#210). Bootstrap, launch completion, Settings changes, and Dock Quit share one live-preference policy controller that skips redundant transitions and logs failed policy requests.
+
 ## [0.60.1] - 2026-08-17
 
 ### Fixed
