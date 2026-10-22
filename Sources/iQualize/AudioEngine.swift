@@ -514,7 +514,8 @@ final class AudioEngine {
                 self.applyLifecycleSnapshot(await lifecycleCoordinator.snapshot())
             }
         }
-        try client.start(helperURL: captureHelperURL())
+        try client.start(helperURL: captureHelperURL(),
+                         deviceUID: runtimeStatus.outputDevice?.deviceTapUID)
         self.captureClient = client
 
         let sampleRate = client.sampleRate

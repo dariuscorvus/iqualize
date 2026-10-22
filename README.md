@@ -262,7 +262,7 @@ The shared-memory ring buffer decouples the helper's real-time IOProc callback f
 
 ## Output Handling
 
-iQualize captures audio at the tap's native sample rate; AVAudioEngine's output node converts it to whatever rate the current output device needs, so playback stays correct across device switches. Bluetooth sends stereo (2ch) only — SBC, AAC, and aptX all max out at 2 channels. If your speaker system supports 5.1 — a Teufel Concept E via USB, say — the hardware handles channel routing and upmixing (Dolby Pro Logic II etc) on its end.
+iQualize normally captures through a global stereo tap, which Core Audio delivers at a fixed rate (48 kHz on every configuration measured so far). When the output is wired or USB stereo hardware running at another rate — a 44.1 kHz headphone jack, a 96 kHz DAC — it taps that device directly instead, so audio reaches the EQ and the output at the device's own rate with no sample-rate conversion. Everywhere else AVAudioEngine's output node converts to whatever rate the current output device needs, so playback stays correct across device switches. Bluetooth sends stereo (2ch) only — SBC, AAC, and aptX all max out at 2 channels. If your speaker system supports 5.1 — a Teufel Concept E via USB, say — the hardware handles channel routing and upmixing (Dolby Pro Logic II etc) on its end.
 
 ## Credits
 

@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.61.0] - 2026-10-22
+
+### Changed
+- Wired and USB stereo outputs running at a rate other than 48 kHz (a 44.1 kHz headphone jack, a 96 kHz DAC) are now captured directly from the device at its own rate. Audio no longer goes through a 48 kHz round trip, and because capture and output share the device clock, the drift compensator settles at a ratio of exactly 1.0 and passes samples through without interpolation. Bluetooth, AirPlay, multi-channel and 48 kHz devices keep the global tap as before, and so does any device whose direct tap fails to start.
+
 ## [0.60.1] - 2026-08-17
 
 ### Fixed

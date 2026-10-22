@@ -295,6 +295,56 @@ func pollMicUsers() {
     }
 }
 
+// MARK: - Tap construction
+
+@available(macOS 14.2, *)
+func configureCaptureTap(_ desc: CATapDescription) {
+    desc.uuid = UUID()
+    desc.muteBehavior = .muted
+    desc.name = "iQualize-EQ-Capture"
+}
+
+func readTapFormat(_ tap: AudioObjectID, _ format: inout AudioStreamBasicDescription) -> OSStatus {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioTapPropertyFormat,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+    return AudioObjectGetPropertyData(tap, &address, 0, nil, &size, &format)
+}
+
+/// The IOProc copy loop and the app's reader both assume interleaved Float32;
+/// the global tap is that by contract, a device tap only if its stream is.
+func isInterleavedFloat32(_ format: AudioStreamBasicDescription) -> Bool {
+    format.mFormatID == kAudioFormatLinearPCM
+        && format.mFormatFlags & kAudioFormatFlagIsFloat != 0
+        && format.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0
+        && format.mBitsPerChannel == 32
+}
+
+/// A muted tap on the first output stream of `deviceUID`, reporting that
+/// stream's own format, or nil if Core Audio refuses it.
+@available(macOS 14.2, *)
+func createDeviceTap(deviceUID: String, excluding excluded: [AudioObjectID])
+    -> (id: AudioObjectID, description: CATapDescription, format: AudioStreamBasicDescription)? {
+    let desc = CATapDescription(excludingProcesses: excluded, deviceUID: deviceUID, stream: 0)
+    configureCaptureTap(desc)
+    var id = AudioObjectID(kAudioObjectUnknown)
+    var status = AudioHardwareCreateProcessTap(desc, &id)
+    var format = AudioStreamBasicDescription()
+    if status == noErr {
+        status = readTapFormat(id, &format)
+        if status != noErr { AudioHardwareDestroyProcessTap(id) }
+    }
+    guard status == noErr else {
+        os_log(.error, log: capLog, "device tap on %{public}@ failed: OSStatus %{public}d — keeping global tap",
+               deviceUID, status)
+        return nil
+    }
+    return (id, desc, format)
+}
+
 // MARK: - Entry point (gated on macOS 14.2 for CATap availability)
 
 @available(macOS 14.2, *)
@@ -338,10 +388,8 @@ func run() {
     }
 
     // 2. Create CATap
-    let tapDesc = CATapDescription(stereoGlobalTapButExcludeProcesses: excluded)
-    tapDesc.uuid = UUID()
-    tapDesc.muteBehavior = .muted
-    tapDesc.name = "iQualize-EQ-Capture"
+    var tapDesc = CATapDescription(stereoGlobalTapButExcludeProcesses: excluded)
+    configureCaptureTap(tapDesc)
 
     os_log(.default, log: capLog, "about to create process tap")
     caCheckExit(
@@ -352,17 +400,36 @@ func run() {
     os_log(.default, log: capLog, "tap created id=%{public}d", tapID)
 
     // 3. Read tap format
-    var formatAddr = AudioObjectPropertyAddress(
-        mSelector: kAudioTapPropertyFormat,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain
-    )
     var tapFormat = AudioStreamBasicDescription()
-    var formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
     caCheckExit(
-        AudioObjectGetPropertyData(tapID, &formatAddr, 0, nil, &formatSize, &tapFormat),
+        readTapFormat(tapID, &tapFormat),
         stage: .tapFormat, "Failed to read tap format", exitCode: 11
     )
+
+    // 3b. The global tap reports one fixed rate (48 kHz as measured). When the app offers its output
+    //     device and that device runs stereo at another rate, tap the device
+    //     directly so its audio arrives unconverted (CaptureTapChoice). Any
+    //     failure keeps the global tap.
+    if let deviceUID = CaptureTapChoice.deviceUID(fromArguments: CommandLine.arguments),
+       let device = createDeviceTap(deviceUID: deviceUID, excluding: excluded) {
+        if isInterleavedFloat32(device.format),
+           CaptureTapChoice.prefersDeviceTap(globalSampleRate: tapFormat.mSampleRate,
+                                             deviceSampleRate: device.format.mSampleRate,
+                                             deviceChannels: device.format.mChannelsPerFrame) {
+            AudioHardwareDestroyProcessTap(tapID)
+            tapID = device.id
+            tapDesc = device.description
+            tapDescription = tapDesc
+            tapFormat = device.format
+            os_log(.default, log: capLog, "device tap adopted: %{public}@ at %{public}.0f Hz",
+                   deviceUID, tapFormat.mSampleRate)
+        } else {
+            AudioHardwareDestroyProcessTap(device.id)
+            os_log(.default, log: capLog,
+                   "device tap not needed: %{public}@ is %{public}u ch at %{public}.0f Hz",
+                   deviceUID, device.format.mChannelsPerFrame, device.format.mSampleRate)
+        }
+    }
     let sampleRate = tapFormat.mSampleRate
     let channels = tapFormat.mChannelsPerFrame
     let ringFrames = 16384

@@ -125,6 +125,21 @@ func getDeviceOutputChannelCount(_ deviceID: AudioDeviceID) throws -> UInt32 {
     return bufferList.reduce(UInt32(0)) { $0 + $1.mNumberChannels }
 }
 
+func getDeviceTransportType(_ deviceID: AudioDeviceID) throws -> UInt32 {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyTransportType,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var transportType: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    try caCheck(
+        AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &transportType),
+        "Failed to get device transport type"
+    )
+    return transportType
+}
+
 func getDefaultOutputDevice() throws -> CoreAudioOutputDevice {
     let deviceID = try getDefaultOutputDeviceID()
     return CoreAudioOutputDevice(
@@ -132,6 +147,7 @@ func getDefaultOutputDevice() throws -> CoreAudioOutputDevice {
         name: try getDeviceName(deviceID),
         uid: try? getDeviceUID(deviceID),
         nominalSampleRate: try? getDeviceNominalSampleRate(deviceID),
-        outputChannelCount: try? getDeviceOutputChannelCount(deviceID)
+        outputChannelCount: try? getDeviceOutputChannelCount(deviceID),
+        transportType: try? getDeviceTransportType(deviceID)
     )
 }

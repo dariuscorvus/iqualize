@@ -129,20 +129,43 @@ struct CoreAudioOutputDevice: Sendable, Equatable {
     let uid: String?
     let nominalSampleRate: Double?
     let outputChannelCount: UInt32?
+    let transportType: UInt32?
 
     init(
         id: AudioDeviceID,
         name: String,
         uid: String?,
         nominalSampleRate: Double?,
-        outputChannelCount: UInt32? = nil
+        outputChannelCount: UInt32? = nil,
+        transportType: UInt32? = nil
     ) {
         self.id = id
         self.name = name
         self.uid = uid
         self.nominalSampleRate = nominalSampleRate
         self.outputChannelCount = outputChannelCount
+        self.transportType = transportType
     }
+
+    /// UID the capture helper may tap directly instead of the global stereo
+    /// mixdown, or nil to keep the global tap. Only wired stereo hardware
+    /// qualifies: multi-channel devices rely on the mixdown's headroom
+    /// compensation (#107), Bluetooth devices on the Continuity handoff proven
+    /// with the global tap (docs/CONTINUITY.md), and AirPlay, virtual and
+    /// aggregate devices were never measured with a device-bound tap.
+    var deviceTapUID: String? {
+        guard outputChannelCount == 2, let transportType,
+              Self.wiredTransportTypes.contains(transportType) else { return nil }
+        return uid
+    }
+
+    private static let wiredTransportTypes: Set<UInt32> = [
+        kAudioDeviceTransportTypeBuiltIn,
+        kAudioDeviceTransportTypeUSB,
+        kAudioDeviceTransportTypeFireWire,
+        kAudioDeviceTransportTypeThunderbolt,
+        kAudioDeviceTransportTypePCI,
+    ]
 }
 
 /// Read-only view assembled off the audio callback. Both the diagnostics window

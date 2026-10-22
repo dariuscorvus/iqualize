@@ -270,3 +270,32 @@ public struct CaptureGeometry: Equatable, Sendable {
         }
     }
 }
+
+// MARK: - Tap choice
+
+/// How the app asks the helper for a device-bound tap, and when the helper
+/// takes it. A stereo global tap reports one fixed rate (48 kHz on every
+/// configuration measured) whatever the output device runs at, so on a 44.1 kHz device every sample was converted to
+/// 48 kHz and back. A tap bound to the device's first output stream reports
+/// that stream's own format instead.
+public enum CaptureTapChoice {
+    /// Helper argument carrying the UID of the output device to tap directly.
+    /// Absent means the global stereo tap.
+    public static let deviceUIDArgument = "--device-uid"
+
+    public static func deviceUID(fromArguments arguments: [String]) -> String? {
+        guard let flag = arguments.firstIndex(of: deviceUIDArgument),
+              arguments.index(after: flag) < arguments.endIndex else { return nil }
+        let uid = arguments[arguments.index(after: flag)]
+        return uid.isEmpty ? nil : uid
+    }
+
+    /// Whether the device-bound tap replaces the global one: only when it is
+    /// stereo and runs at a rate the global tap does not, the one case where
+    /// the global tap forces a sample-rate conversion.
+    public static func prefersDeviceTap(globalSampleRate: Float64,
+                                        deviceSampleRate: Float64,
+                                        deviceChannels: UInt32) -> Bool {
+        deviceChannels == 2 && deviceSampleRate != globalSampleRate
+    }
+}
