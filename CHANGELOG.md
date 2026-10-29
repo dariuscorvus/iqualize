@@ -2,6 +2,11 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.60.2] - 2026-10-30
+
+### Fixed
+- Publish spectrum magnitudes and peaks as complete snapshots with a non-blocking three-buffer handoff, preventing the audio writer from overwriting data while the UI copies it (#102).
+
 ## [0.60.1] - 2026-08-17
 
 ### Fixed

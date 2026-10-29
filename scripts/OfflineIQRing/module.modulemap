@@ -1,0 +1,4 @@
+module IQRingAtomics {
+    header "../../Sources/IQRingAtomics/include/iq_ring_atomics.h"
+    export *
+}

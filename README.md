@@ -178,7 +178,7 @@ Accessible via the gear icon in the EQ window, the Settings item in the menu bar
 - Independent toggle checkboxes for pre-EQ and post-EQ display
 - 2048-point FFT via Accelerate vDSP with Hann windowing and log-frequency binning
 - Catmull-Rom spline rendering with peak hold lines
-- Lock-free double-buffered audio-to-UI transfer, so 60fps UI updates never block on the audio thread
+- Lock-free triple-buffered audio-to-UI transfer keeps each magnitude/peak snapshot coherent without blocking the audio thread
 - Customizable line and fill colors per spectrum (Settings → Display) — defaults to cyan for pre-EQ, orange for post-EQ, both adapting to Light and Dark appearance; reset returns to the dynamic system color
 - Per-spectrum fill toggle (off by default for pre-EQ, on for post-EQ) with its own color, independent from the line color
 - Post-EQ spectrum auto-hides when EQ bypass is active (post-EQ would otherwise just mirror pre-EQ)

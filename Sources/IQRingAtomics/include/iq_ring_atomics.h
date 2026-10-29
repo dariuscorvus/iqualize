@@ -22,6 +22,13 @@ static inline void iq_store_release_u64(uint64_t *p, uint64_t v) {
     __atomic_store_n(p, v, __ATOMIC_RELEASE);
 }
 
+// SPSC triple-buffer handoff: publish the writer's completed slot and acquire
+// the previous middle slot. The reader uses the same exchange to release its
+// old front slot, so neither side reuses storage still owned by the other.
+static inline uint64_t iq_exchange_acq_rel_u64(uint64_t *p, uint64_t v) {
+    return __atomic_exchange_n(p, v, __ATOMIC_ACQ_REL);
+}
+
 // Relaxed variants for single-writer telemetry counters: torn-free, no
 // ordering — readers only need eventually-consistent whole values.
 static inline uint64_t iq_load_relaxed_u64(const uint64_t *p) {

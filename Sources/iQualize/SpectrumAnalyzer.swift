@@ -3,7 +3,7 @@ import AVFAudio
 
 /// Real-time FFT spectrum analyzer. Processes AVAudioPCMBuffers from an installTap
 /// callback and writes smoothed log-frequency magnitudes + peak hold values to a
-/// SpectrumData double-buffer for UI consumption.
+/// SpectrumData triple-buffer for UI consumption.
 ///
 /// One instance per tap point (pre-EQ and post-EQ each get their own).
 /// All processing happens in the tap callback — no additional threads.
