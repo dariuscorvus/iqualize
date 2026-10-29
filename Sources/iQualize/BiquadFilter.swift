@@ -238,7 +238,8 @@ final class BiquadFilterChain: @unchecked Sendable {
     private static func coefficients(for bands: [EQBand], sampleRate: Double)
         -> [NormalizedBiquadCoeffs] {
         bands.map {
-            NormalizedBiquadCoeffs(
+            guard !$0.muted else { return .passthrough }
+            return NormalizedBiquadCoeffs(
                 from: BiquadResponse.coefficients(for: $0, sampleRate: sampleRate)
             )
         }

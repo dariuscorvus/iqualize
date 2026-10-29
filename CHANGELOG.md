@@ -2,6 +2,12 @@
 
 All notable changes to iQualize will be documented in this file.
 
+## [0.60.2] - 2026-10-30
+
+### Fixed
+- Apply native EQ gains through the Audio Unit parameter interface when configuring bands, including filter-type changes, so switching from a high-pass preset does not retain the previous gain (#205).
+- Make muted high-pass and low-pass bands bypass processing in both native EQ and custom biquad chains, and restore filtering on unmute.
+
 ## [0.60.1] - 2026-08-17
 
 ### Fixed

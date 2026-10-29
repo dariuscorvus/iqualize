@@ -873,36 +873,7 @@ final class AudioEngine {
             // the biquad chains instead, cascaded ahead of it in the render
             // callback — so band count here is CPU-bound, not AU-bound.
             let allBands = activePreset.bands
-            let newCount = min(allBands.count, Self.avEQNativeBandCount)
-            let oldCount = min(old?.bands.count ?? 0, Self.avEQNativeBandCount)
-
-            for i in 0..<newCount {
-                let band = allBands[i]
-                let eqBand = eq.bands[i]
-                if i >= oldCount {
-                    // New band — configure fully
-                    eqBand.filterType = band.filterType.avType
-                    eqBand.frequency = band.frequency
-                    eqBand.bandwidth = band.bandwidth
-                    eqBand.gain = effectiveGain(band)
-                    eqBand.bypass = false
-                } else if let oldBand = old?.bands[i] {
-                    // Existing band — only update changed params
-                    if band.filterType != oldBand.filterType { eqBand.filterType = band.filterType.avType }
-                    if band.frequency != oldBand.frequency { eqBand.frequency = band.frequency }
-                    if effectiveGain(band) != effectiveGain(oldBand) { eqBand.gain = effectiveGain(band) }
-                    if band.bandwidth != oldBand.bandwidth { eqBand.bandwidth = band.bandwidth }
-                }
-            }
-
-            // Bypass AU slots not currently in use (covers both a preset shrinking
-            // and the very first call, where oldCount is 0 and eq.bands defaults
-            // to un-bypassed).
-            if newCount < eq.bands.count {
-                for i in newCount..<eq.bands.count {
-                    eq.bands[i].bypass = true
-                }
-            }
+            configureNativeEQBands(eq, bands: allBands, oldBands: old?.bands)
 
             if allBands.count > Self.avEQNativeBandCount {
                 let overflowBands = withEffectiveGain(Array(allBands[Self.avEQNativeBandCount...]))
